@@ -15,6 +15,8 @@ import { t } from "@/lib/i18n";
 import { checkResult } from "@/lib/rules/checks";
 import { readingKey } from "@/lib/rules/consensus";
 import { diffScores } from "@/lib/rules/diff";
+import { SolidarityPanel } from "@/components/solidarity/SafetyPanel";
+import { SOLIDARITY_ENABLED } from "@/lib/solidarity/config";
 import { ExtractedResult, PartyScores, type UnitStatus } from "@/lib/schemas";
 import { publicClient } from "@/lib/supabase/server";
 
@@ -110,6 +112,8 @@ async function Unit({ params }: Pick<PageProps<"/units/[code]">, "params">) {
       </div>
 
       <div className="flex flex-col gap-5">
+
+      {SOLIDARITY_ENABLED && <SolidarityPanel unitId={unit.id} code={unit.code} />}
 
       <Card title={t("unit.wallResult")} icon={ShieldCheck}>
         {agreed ? (
