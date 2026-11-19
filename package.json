@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx --env-file=.env supabase/seed.ts",
+    "import:polling-units": "tsx --env-file=.env scripts/import-polling-units.ts",
     "icons": "tsx scripts/make-icons.ts",
     "fixture": "tsx --env-file=.env scripts/record-fixture.ts"
   },

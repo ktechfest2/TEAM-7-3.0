@@ -29,8 +29,21 @@ don't match the wall.
 | `npm test` | Rule-engine tests (checks, consensus, diff) |
 | `npm run typecheck` | TypeScript check |
 | `npm run seed` | (Re)create simulated demo data |
+| `npm run import:polling-units` | Import a versioned INEC polling-unit directory snapshot into Supabase |
 | `npm run icons` | Regenerate PWA PNG icons from `public/icons/icon.svg` |
 | `npm run fixture -- <photoId>` | Save a real reading as a `DEMO_MODE` cached fixture |
+
+## Polling unit directory API
+
+`GET /api/polling-units` serves real directory records from Supabase. Search with `?code=01/02/03/004` for a full PVC polling-unit code, or use `?q=market&state=Lagos&limit=20&offset=0` for paginated text search. The capture form loads its State → LGA → Ward → Polling unit options from `?level=states`, `?level=lgas&state=Lagos`, `?level=wards&state=Lagos&lga=Ikeja`, and `?level=units&state=Lagos&lga=Ikeja&ward=...`. Responses include dataset provenance. Simulated `SIM-*` demo units are excluded from the real directory API and remain available in the existing demo experience.
+
+To import real directory data:
+
+1. Apply `supabase/migrations/20261119000000_polling_unit_directory.sql` in the Supabase SQL Editor.
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
+3. Run `npm run import:polling-units`.
+
+The importer resolves the selected GitHub ref to a commit, validates the source manifest, row count, full codes, and duplicates, then upserts in batches. It marks older imported snapshots inactive only after the new snapshot has fully imported. By default it uses the source repo's `main` branch; set `INEC_DATASET_REF` to a 40-character commit SHA for a repeatable import. The source is the community-maintained [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) snapshot of INEC's public CVR directory; check records against INEC before relying on them. This import contains names and administrative locations, not verified directions or coordinates.
 
 ## How the core flow works
 

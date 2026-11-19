@@ -21,6 +21,22 @@ import { browserClient } from "@/lib/supabase/browser";
 type Draft = { blob: Blob; sha256: string; capturedAt: string; url: string };
 
 const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x))].sort();
+type DirectoryOption = { code: string; name: string };
+type DirectoryUnit = CachedUnit & { location?: string | null };
+
+async function fetchDirectory<T>(params: Record<string, string>): Promise<T[]> {
+  const query = new URLSearchParams(params);
+  const response = await fetch(`/api/polling-units?${query}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Polling unit directory is unavailable");
+  const body = (await response.json()) as { data?: T[] };
+  return body.data ?? [];
+}
+
+function mergeUnits(...lists: CachedUnit[][]): CachedUnit[] {
+  const byId = new Map<string, CachedUnit>();
+  for (const list of lists) for (const unit of list) byId.set(unit.id, unit);
+  return [...byId.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
 
 /**
  * State → LGA → Ward → Polling unit, then photograph, check (retake or send).
@@ -31,6 +47,11 @@ export function CaptureForm() {
   const online = useOnline();
   const captures = useCaptures();
   const [units, setUnits] = useState<CachedUnit[]>([]);
+  const [realStates, setRealStates] = useState<DirectoryOption[]>([]);
+  const [lgaOptions, setLgaOptions] = useState<{ parent: string; items: DirectoryOption[] }>({ parent: "", items: [] });
+  const [wardOptions, setWardOptions] = useState<{ parent: string; items: DirectoryOption[] }>({ parent: "", items: [] });
+  const [unitOptions, setUnitOptions] = useState<{ parent: string; items: DirectoryUnit[] }>({ parent: "", items: [] });
+  const [directoryError, setDirectoryError] = useState(false);
   const [pick, setPick] = useState({ state: "", lga: "", ward: "", unit: "" });
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,40 +60,108 @@ export function CaptureForm() {
   const [sent, setSent] = useState<{ id: string; url: string } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
 
-  // Units: show the offline cache immediately, then refresh from the network if possible.
+  // Keep demo and previously selected units available offline; load real directory options online.
   useEffect(() => {
     const wanted = params.get("unit");
     const apply = (list: CachedUnit[]) => {
       if (!list.length) return;
-      setUnits(list);
+      setUnits((current) => mergeUnits(current, list));
       const u = wanted ? list.find((x) => x.code === wanted) : undefined;
       if (u) setPick((p) => (p.unit ? p : { state: u.state ?? "", lga: u.lga ?? "", ward: u.ward, unit: u.id }));
     };
     void cachedUnits().then(apply);
-    void browserClient()
-      .from("polling_units")
-      .select("id, code, name, ward, lga, state")
-      .order("code")
-      .then(({ data }) => {
-        if (!data) return;
-        apply(data as CachedUnit[]);
-        void cacheUnits(data as CachedUnit[]);
-      });
+    if (online) {
+      void fetchDirectory<DirectoryOption>({ level: "states" })
+        .then(setRealStates)
+        .catch(() => setDirectoryError(true));
+      void browserClient()
+        .from("polling_units")
+        .select("id, code, name, ward, lga, state")
+        .eq("is_simulated", true)
+        .order("code")
+        .then(({ data }) => {
+          if (!data) return;
+          const demoUnits = data as CachedUnit[];
+          setUnits((current) => mergeUnits(current, demoUnits));
+          void cacheUnits(demoUnits, false);
+          const u = wanted ? demoUnits.find((x) => x.code === wanted) : undefined;
+          if (u) setPick((p) => (p.unit ? p : { state: u.state ?? "", lga: u.lga ?? "", ward: u.ward, unit: u.id }));
+        });
+      if (wanted && !wanted.startsWith("SIM-")) {
+        void fetchDirectory<DirectoryUnit>({ code: wanted })
+          .then((found) => {
+            const u = found[0];
+            if (!u) return;
+            setUnits((current) => mergeUnits(current, [u]));
+            void cacheUnits([u], false);
+            setPick((p) => (p.unit ? p : { state: u.state ?? "", lga: u.lga ?? "", ward: u.ward, unit: u.id }));
+          })
+          .catch(() => setDirectoryError(true));
+      }
+    }
     void browserClient().auth.getSession().then(({ data }) => setSignedIn(!!data.session));
-  }, [params]);
+  }, [params, online]);
+
+  const states = useMemo(
+    () => uniq([...realStates.map((s) => s.name), ...units.map((u) => u.state)]),
+    [realStates, units],
+  );
+  const state = pick.state || (states.length === 1 ? states[0] : "");
+  const isRealState = realStates.some((s) => s.name === state);
+  const realLgas = lgaOptions.parent === state ? lgaOptions.items : [];
+
+  useEffect(() => {
+    if (!online || !isRealState || !state) return;
+    let active = true;
+    void fetchDirectory<DirectoryOption>({ level: "lgas", state })
+      .then((options) => { if (active) setLgaOptions({ parent: state, items: options }); })
+      .catch(() => { if (active) setDirectoryError(true); });
+    return () => { active = false; };
+  }, [online, isRealState, state]);
+
+  const lgas = isRealState && online
+    ? realLgas.map((option) => option.name)
+    : uniq(units.filter((u) => u.state === state).map((u) => u.lga));
+  const lga = pick.lga || (lgas.length === 1 ? lgas[0] : "");
+  const realWards = wardOptions.parent === `${state}/${lga}` ? wardOptions.items : [];
+
+  useEffect(() => {
+    if (!online || !isRealState || !state || !lga) return;
+    let active = true;
+    void fetchDirectory<DirectoryOption>({ level: "wards", state, lga })
+      .then((options) => { if (active) setWardOptions({ parent: `${state}/${lga}`, items: options }); })
+      .catch(() => { if (active) setDirectoryError(true); });
+    return () => { active = false; };
+  }, [online, isRealState, state, lga]);
+
+  const wards = isRealState && online
+    ? realWards.map((option) => option.name)
+    : uniq(units.filter((u) => u.state === state && u.lga === lga).map((u) => u.ward));
+  const ward = pick.ward || (wards.length === 1 ? wards[0] : "");
+  const realUnits = unitOptions.parent === `${state}/${lga}/${ward}` ? unitOptions.items : [];
+
+  useEffect(() => {
+    if (!online || !isRealState || !state || !lga || !ward) return;
+    let active = true;
+    void fetchDirectory<DirectoryUnit>({ level: "units", state, lga, ward })
+      .then((options) => {
+        if (!active) return;
+        setUnitOptions({ parent: `${state}/${lga}/${ward}`, items: options });
+        void cacheUnits(options, false);
+        setUnits((current) => mergeUnits(current, options));
+      })
+      .catch(() => { if (active) setDirectoryError(true); });
+    return () => { active = false; };
+  }, [online, isRealState, state, lga, ward]);
 
   // Each level's options depend on the level above. A level with only one option fills itself in.
   const sel = useMemo(() => {
-    const states = uniq(units.map((u) => u.state));
-    const state = pick.state || (states.length === 1 ? states[0] : "");
-    const lgas = uniq(units.filter((u) => u.state === state).map((u) => u.lga));
-    const lga = pick.lga || (lgas.length === 1 ? lgas[0] : "");
-    const wards = uniq(units.filter((u) => u.state === state && u.lga === lga).map((u) => u.ward));
-    const ward = pick.ward || (wards.length === 1 ? wards[0] : "");
-    const inWard = units.filter((u) => u.state === state && u.lga === lga && u.ward === ward);
+    const inWard = isRealState && online
+      ? realUnits
+      : units.filter((u) => u.state === state && u.lga === lga && u.ward === ward);
     const unit = pick.unit || (inWard.length === 1 ? inWard[0].id : "");
     return { states, state, lgas, lga, wards, ward, inWard, unit };
-  }, [units, pick]);
+  }, [units, realUnits, isRealState, online, states, state, lgas, lga, wards, ward, pick.unit]);
 
   const unitId = sel.unit;
   const ready = !!unitId;
@@ -164,24 +253,26 @@ export function CaptureForm() {
           label={t("capture.lga")}
           value={sel.lga}
           options={sel.lgas.map((s) => [s, s])}
-          disabled={locked || !sel.state}
+          disabled={locked || !sel.state || (online && isRealState && realLgas.length === 0)}
           onChange={(v) => setPick((p) => ({ ...p, lga: v, ward: "", unit: "" }))}
         />
         <Select
           label={t("capture.ward")}
           value={sel.ward}
           options={sel.wards.map((s) => [s, s])}
-          disabled={locked || !sel.lga}
+          disabled={locked || !sel.lga || (online && isRealState && realWards.length === 0)}
           onChange={(v) => setPick((p) => ({ ...p, ward: v, unit: "" }))}
         />
         <Select
           label={t("capture.unit")}
           value={sel.unit}
-          options={sel.inWard.map((u) => [u.id, `${u.code} · ${u.name}`])}
-          disabled={locked || !sel.ward}
+          options={sel.inWard.map((u) => [u.id, `${u.code} · ${u.name}${"location" in u && u.location ? ` — ${u.location}` : ""}`])}
+          disabled={locked || !sel.ward || (online && isRealState && realUnits.length === 0)}
           onChange={(v) => setPick((p) => ({ ...p, unit: v }))}
         />
       </div>
+
+      {directoryError && <p role="status" className="text-xs text-muted">{t("capture.directoryError")}</p>}
 
       {draft ? (
         <Review draft={draft} busy={busy} onRetake={openCamera} onCancel={cancel} onSend={send} />

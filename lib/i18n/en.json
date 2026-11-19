@@ -210,6 +210,7 @@
   "capture.ward": "Ward",
   "capture.choose": "Select…",
   "capture.fillFirst": "Fill in all four fields to start",
+  "capture.directoryError": "Could not load the real polling unit list. Cached or demo units may still be available.",
   "capture.signInToSnap": "Sign in to photograph",
   "capture.form.title": "Report a result sheet",
   "capture.form.hint": "Where are you? Then photograph the EC8A on the wall.",

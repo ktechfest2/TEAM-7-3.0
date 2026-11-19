@@ -46,9 +46,9 @@ export async function listCaptures() {
 }
 
 /** Keeps the unit list available offline for the capture screen. */
-export async function cacheUnits(units: CachedUnit[]) {
+export async function cacheUnits(units: CachedUnit[], replace = true) {
   const tx = (await db()).transaction("units", "readwrite");
-  await tx.store.clear();
+  if (replace) await tx.store.clear();
   await Promise.all(units.map((u) => tx.store.put(u)));
   await tx.done;
 }
