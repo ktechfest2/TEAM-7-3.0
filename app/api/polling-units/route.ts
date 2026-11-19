@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { publicClient } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
-
 const SOURCE = "INEC CVR portal via the community-maintained nigeria-inec-geo snapshot";
 const SOURCE_TAG = "INEC CVR portal via nigeria-inec-geo";
 const CODE = /^\d{2}\/\d{2}\/\d{2}\/\d{3}$/;
