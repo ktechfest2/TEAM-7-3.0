@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { COLLATION_ROLES } from "@/lib/demo-users";
 import { CollationInput } from "@/lib/schemas";
 import { recomputeDiscrepancies } from "@/lib/server/recompute";
 import { adminClient } from "@/lib/supabase/admin";
@@ -13,12 +12,11 @@ export async function POST(req: Request) {
   if (!body.success) return fail("Check the figures and try again", 400);
   if (!body.data.unitId) return fail("Choose a polling unit", 400);
 
+  // No login: anyone can enter an announced figure. Each line records which phone entered
+  // it (anonymous session) and its source, and it is only ever compared, never trusted.
   const supabase = await userClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return fail("Sign in first", 401);
-  const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
-  if (!profile || !(COLLATION_ROLES as readonly string[]).includes(profile.role))
-    return fail("Only party agents and observers can enter collated figures", 403);
+  if (!user) return fail("This phone has no session yet. Try again.", 401);
 
   const admin = adminClient();
   const { data: unit } = await admin.from("polling_units").select("id, code, ward").eq("id", body.data.unitId).maybeSingle();
@@ -26,6 +24,7 @@ export async function POST(req: Request) {
 
   const ins = await admin.from("collation_results").insert({
     level: body.data.level,
+    election: body.data.election,
     area_code: body.data.level === "ward" ? unit.ward : body.data.areaCode,
     unit_id: unit.id,
     party_scores: body.data.partyScores,
@@ -36,6 +35,6 @@ export async function POST(req: Request) {
   });
   if (ins.error) return fail(ins.error.message, 500);
 
-  await recomputeDiscrepancies(unit.id);
+  await recomputeDiscrepancies(unit.id, body.data.election);
   return NextResponse.json({ ok: true, unitCode: unit.code });
 }

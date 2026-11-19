@@ -7,9 +7,11 @@ import { Card } from "@/components/Card";
 import { DiffTable } from "@/components/DiffTable";
 import { EmptyState } from "@/components/EmptyState";
 import { FiguresTable } from "@/components/FiguresTable";
+import { ElectionTabs } from "@/components/ElectionTabs";
 import { FlagList } from "@/components/FlagList";
 import { HashChip } from "@/components/HashChip";
 import { StatusBadge, WitnessMeter } from "@/components/StatusBadge";
+import { electionLinks, parseElection } from "@/lib/elections";
 import { formatTime, photoUrl } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { checkResult } from "@/lib/rules/checks";
@@ -18,19 +20,21 @@ import { diffScores } from "@/lib/rules/diff";
 import { SolidarityPanel } from "@/components/solidarity/SafetyPanel";
 import { SOLIDARITY_ENABLED } from "@/lib/solidarity/config";
 import { ExtractedResult, PartyScores, type UnitStatus } from "@/lib/schemas";
+import { many } from "@/lib/rows";
 import { publicClient } from "@/lib/supabase/server";
 
-export default function UnitPage({ params }: PageProps<"/units/[code]">) {
+export default function UnitPage({ params, searchParams }: PageProps<"/units/[code]">) {
   return (
     <>
       <BackLink href="/units" label={t("units.title")} />
       <Suspense fallback={<div className="flex flex-col gap-4">{[40, 56, 64].map((h) => <div key={h} className="card animate-pulse" style={{ height: h * 4 }} />)}</div>}>
-        <Unit params={params} />
+        <Unit params={params} searchParams={searchParams} />
       </Suspense>
     </>
   );
 }
 
+type UnitResultRow = { status: UnitStatus; witness_count: number; agreed_scores: unknown; verified_at: string | null };
 type UnitRow = {
   id: string;
   code: string;
@@ -38,7 +42,7 @@ type UnitRow = {
   ward: string;
   lga: string;
   is_simulated: boolean;
-  unit_results: { status: UnitStatus; witness_count: number; agreed_scores: unknown; verified_at: string | null } | null;
+  unit_results: UnitResultRow | UnitResultRow[] | null;
   result_photos: {
     id: string;
     user_id: string;
@@ -52,9 +56,10 @@ type UnitRow = {
   collation_results: { id: string; level: string; party_scores: unknown; source: string; announced_at: string; is_simulated: boolean }[];
 };
 
-async function Unit({ params }: Pick<PageProps<"/units/[code]">, "params">) {
+async function Unit({ params, searchParams }: Pick<PageProps<"/units/[code]">, "params" | "searchParams">) {
   await connection();
   const { code } = await params;
+  const election = parseElection((await searchParams).election);
   const { data: unit } = await publicClient()
     .from("polling_units")
     .select(
@@ -64,15 +69,19 @@ async function Unit({ params }: Pick<PageProps<"/units/[code]">, "params">) {
        collation_results(id, level, party_scores, source, announced_at, is_simulated)`,
     )
     .eq("code", decodeURIComponent(code))
+    .eq("unit_results.election", election)
+    .eq("result_photos.election", election)
+    .eq("collation_results.election", election)
     .order("uploaded_at", { referencedTable: "result_photos" })
     .order("announced_at", { referencedTable: "collation_results", ascending: false })
     .maybeSingle<UnitRow>();
 
   if (!unit) return <EmptyState icon={SearchX} title={t("unit.notFound")} />;
 
-  const status = unit.unit_results?.status ?? "pending";
-  const witnesses = unit.unit_results?.witness_count ?? 0;
-  const agreed = status === "verified" ? ExtractedResult.parse(unit.unit_results?.agreed_scores) : null;
+  const result = many(unit.unit_results)[0];
+  const status = result?.status ?? "pending";
+  const witnesses = result?.witness_count ?? 0;
+  const agreed = status === "verified" ? ExtractedResult.parse(result?.agreed_scores) : null;
   const agreedKey = agreed ? readingKey(agreed) : null;
   // Number witnesses by first appearance, never by name or id.
   const witnessNo = new Map<string, number>();
@@ -106,7 +115,9 @@ async function Unit({ params }: Pick<PageProps<"/units/[code]">, "params">) {
         </div>
       </header>
 
-      <Link href={`/capture?unit=${encodeURIComponent(unit.code)}`} className="btn btn-primary min-h-14 text-base">
+      <ElectionTabs value={election} links={electionLinks((e) => `/units/${encodeURIComponent(unit.code)}?election=${e}`)} />
+
+      <Link href={`/capture?unit=${encodeURIComponent(unit.code)}&election=${election}`} className="btn btn-primary min-h-14 text-base">
         <Camera aria-hidden className="size-5" /> {t("unit.addPhoto")}
       </Link>
       </div>
@@ -120,8 +131,8 @@ async function Unit({ params }: Pick<PageProps<"/units/[code]">, "params">) {
           <>
             <FiguresTable result={agreed} />
             <FlagList flags={checkResult(agreed)} />
-            {unit.unit_results?.verified_at && (
-              <p className="text-xs text-muted">{t("unit.verifiedAt", { time: formatTime(unit.unit_results.verified_at) })}</p>
+            {result?.verified_at && (
+              <p className="text-xs text-muted">{t("unit.verifiedAt", { time: formatTime(result.verified_at) })}</p>
             )}
           </>
         ) : (

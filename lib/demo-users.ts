@@ -1,4 +1,4 @@
-/** Seeded demo accounts (SIMULATED). Shared by the seed script and the login picker. */
+/** Seeded demo witnesses (SIMULATED), used by the seed script to create readings. There is no login screen. */
 export const DEMO_USERS = [
   { email: "witness1@demo.countrack.test", role: "witness", name: "Witness 1" },
   { email: "witness2@demo.countrack.test", role: "witness", name: "Witness 2" },
@@ -8,4 +8,3 @@ export const DEMO_USERS = [
 ] as const;
 
 export type DemoUser = (typeof DEMO_USERS)[number];
-export const COLLATION_ROLES = ["agent", "observer"] as const;

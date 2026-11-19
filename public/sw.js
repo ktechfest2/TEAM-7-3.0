@@ -1,19 +1,25 @@
 // CounTrack service worker: keeps the capture flow usable offline.
 // Bump VERSION on every deploy that changes the app shell.
-const VERSION = "v1";
+const VERSION = "v5";
 const CACHE = `countrack-${VERSION}`;
-const SHELL = ["/", "/capture", "/queue", "/manifest.webmanifest", "/icons/icon-192.png"];
+const PAGES = ["/capture", "/", "/queue"];
+const SHELL = [...PAGES, "/manifest.webmanifest", "/icons/icon-192.png"];
+// On a weak mobile signal a request can hang for a long time: give the network this long,
+// then answer from the saved copy so the app still opens.
+const NETWORK_TIMEOUT_MS = 4000;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
-      await cache.addAll(SHELL);
-      // Also cache the JS/CSS those pages reference, so /capture works offline even if never opened.
+      // One slow or failing page must not stop the rest being saved (addAll is all-or-nothing).
+      await Promise.allSettled(SHELL.map((p) => cache.add(new Request(p, { cache: "reload" }))));
+      // Also cache the JS/CSS those pages reference, so they work offline even if never opened.
       const assets = new Set();
-      for (const path of SHELL.slice(0, 3)) {
-        const html = await (await cache.match(path)).text();
-        for (const m of html.matchAll(/\/_next\/static\/[^"'\s)]+/g)) assets.add(m[0]);
+      for (const path of PAGES) {
+        const res = await cache.match(path);
+        if (!res) continue;
+        for (const m of (await res.text()).matchAll(/\/_next\/static\/[^"'\s)\\]+/g)) assets.add(m[0]);
       }
       await Promise.allSettled([...assets].map((a) => cache.add(a)));
       await self.skipWaiting();
@@ -52,15 +58,18 @@ async function cacheFirst(req) {
 }
 
 async function networkFirst(req) {
-  try {
-    const res = await fetch(req);
+  const network = fetch(req).then(async (res) => {
     if (res.ok) (await caches.open(CACHE)).put(req, res.clone());
     return res;
+  });
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), NETWORK_TIMEOUT_MS));
+  try {
+    const res = await Promise.race([network, timeout]);
+    if (res) return res;
   } catch {
-    return (
-      (await caches.match(req, { ignoreSearch: true })) ??
-      (await caches.match("/capture")) ??
-      Response.error()
-    );
+    /* offline: fall through to the saved copy */
   }
+  const saved = (await caches.match(req, { ignoreSearch: true })) ?? (await caches.match("/capture"));
+  // Still nothing saved: keep waiting for the slow network rather than failing outright.
+  return saved ?? network.catch(() => Response.error());
 }

@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import { browserClient } from "@/lib/supabase/browser";
+import { newId } from "@/lib/id";
+import { browserClient, ensureSession } from "@/lib/supabase/browser";
 import type { CheckinStatus } from "./types";
 
 /**
@@ -21,7 +22,7 @@ const db = () =>
   }));
 
 export async function enqueueCheckin(unitId: string, status: CheckinStatus): Promise<QueuedCheckin> {
-  const item = { localId: crypto.randomUUID(), unitId, status, createdAt: new Date().toISOString() };
+  const item = { localId: newId(), unitId, status, createdAt: new Date().toISOString() };
   await (await db()).put("checkins", item);
   return item;
 }
@@ -36,14 +37,9 @@ export async function syncCheckins(): Promise<SyncOutcome> {
   const outcome: SyncOutcome = { sent: 0, pending: await d.count("checkins"), rateLimited: false };
   if (!outcome.pending || !navigator.onLine) return outcome;
 
+  const userId = await ensureSession();
+  if (!userId) return outcome;
   const supabase = browserClient();
-  let { data } = await supabase.auth.getSession();
-  if (!data.session) {
-    const anon = await supabase.auth.signInAnonymously();
-    if (anon.error || !anon.data.user) return outcome;
-    data = { session: anon.data.session };
-  }
-  const userId = data.session!.user.id;
 
   const items = (await d.getAll("checkins")).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const item of items) {

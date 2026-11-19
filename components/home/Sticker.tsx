@@ -48,16 +48,3 @@ export function DoodlePattern({ id, scale = 1, className = "" }: { id: string; s
     </svg>
   );
 }
-
-/** Inline emoji in a small tilted tile, used inside big statement text. */
-export function EmojiTile({ emoji, tilt = -6 }: { emoji: string; tilt?: number }) {
-  return (
-    <span
-      aria-hidden
-      className="mx-1 inline-grid size-[1.05em] translate-y-[0.08em] place-items-center rounded-[0.28em] bg-surface align-baseline text-[0.7em] shadow-card"
-      style={{ transform: `rotate(${tilt}deg)` }}
-    >
-      {emoji}
-    </span>
-  );
-}

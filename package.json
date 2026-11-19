@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "preview": "next build && next start -H 0.0.0.0 -p 3000",
+    "tunnel": "npx -y cloudflared tunnel --url http://localhost:3000",
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",

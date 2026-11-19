@@ -3,7 +3,9 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
+import { FinalizePrompt } from "@/components/FinalizePrompt";
 import { Footer } from "@/components/Footer";
+import { Preloader } from "@/components/Preloader";
 import { SyncManager } from "@/components/SyncManager";
 import "./globals.css";
 
@@ -32,8 +34,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
+        <Preloader />
         <AppHeader />
         <SyncManager />
+        <FinalizePrompt />
         <main className="flex w-full flex-1 flex-col">{children}</main>
         <Footer />
         <Suspense>

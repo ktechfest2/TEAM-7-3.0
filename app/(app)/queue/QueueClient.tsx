@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Camera, Inbox, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { CaptureStatus } from "@/components/CaptureStatus";
+import { openFinalizePrompt } from "@/components/FinalizePrompt";
 import { EmptyState } from "@/components/EmptyState";
 import { HashChip } from "@/components/HashChip";
 import { formatTime } from "@/lib/format";
@@ -58,12 +59,20 @@ export function QueueClient() {
         {captures?.map((c) => (
           <li key={c.localId} className="card flex flex-col gap-3 p-4">
             <div className="flex items-center justify-between gap-2">
-              <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-xs font-semibold">{codes[c.unitId] ?? "—"}</span>
+              <span className="flex items-center gap-2">
+                <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-xs font-semibold">{codes[c.unitId] ?? c.unitCode ?? "—"}</span>
+                <span className="text-xs font-medium text-muted">{t(`election.${c.election ?? "presidential"}`)}</span>
+              </span>
               <span className="text-xs text-muted">{formatTime(c.capturedAt)}</span>
             </div>
             <HashChip hash={c.sha256} />
             <div className="flex items-center justify-between gap-2">
               <CaptureStatus item={c} online={online} />
+              {c.status === "draft" && online && (
+                <button onClick={openFinalizePrompt} className="inline-flex items-center gap-1 text-sm font-semibold text-brand">
+                  {t("draft.finish")} <ArrowRight aria-hidden className="size-4" />
+                </button>
+              )}
               {c.status === "done" && c.photoId && (
                 <Link href={`/review/${c.photoId}`} className="inline-flex items-center gap-1 text-sm font-semibold text-brand">
                   {t("capture.seeResult")} <ArrowRight aria-hidden className="size-4" />

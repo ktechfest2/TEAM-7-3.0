@@ -2,13 +2,15 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
 import { ArrowRight, ArrowUpRight, Fingerprint } from "lucide-react";
-import { CaptureForm } from "@/components/capture/CaptureForm";
+import { ReportSheet } from "@/components/capture/ReportSheet";
+import { LiveFeed } from "@/components/home/LiveFeed";
 import { MatchDemo } from "@/components/home/MatchDemo";
-import { ScrollReveal } from "@/components/home/ScrollReveal";
-import { DoodlePattern, EmojiTile, SpinSticker } from "@/components/home/Sticker";
+import { DoodlePattern, SpinSticker } from "@/components/home/Sticker";
+import { UnitCompare } from "@/components/home/UnitCompare";
 import { QueueBadge } from "@/components/QueueBadge";
 import { t, type MessageKey } from "@/lib/i18n";
 import type { UnitStatus } from "@/lib/schemas";
+import { many } from "@/lib/rows";
 import { publicClient } from "@/lib/supabase/server";
 
 export default function Home() {
@@ -17,7 +19,7 @@ export default function Home() {
       <Hero />
       <div className="flex flex-col gap-2 p-2 md:gap-3 md:p-3">
         <QueueBadge />
-        <Statement />
+        <LiveFeed />
         <div className="mx-auto my-6 grid w-full max-w-6xl gap-3 px-2 md:my-14 md:grid-cols-2 md:gap-4 md:px-8">
           <SealPanel />
           <WitnessPanel />
@@ -47,16 +49,12 @@ function Hero() {
           </span>
         </h1>
 
-        {/* The capture form, right where the eye lands */}
-        <div className="relative mx-auto mt-10 max-w-2xl animate-rise md:mt-14" style={{ animationDelay: "100ms" }}>
+        {/* The capture form, right where the eye lands: one tab per election */}
+        <div id="report" className="relative mx-auto mt-10 max-w-2xl scroll-mt-24 animate-rise md:mt-14" style={{ animationDelay: "100ms" }}>
           <SpinSticker small text={t("home.sticker")} className="absolute -right-5 -bottom-8 z-10 hidden sm:grid md:-right-10 md:-bottom-10" />
           <div className="rounded-[1.75rem] bg-bg p-5 text-left text-text shadow-lift md:p-8">
-            <div className="mb-5 flex flex-col gap-1">
-              <h2 className="font-display text-2xl font-extrabold tracking-tight md:text-3xl">{t("capture.form.title")}</h2>
-              <p className="text-sm text-muted">{t("capture.form.hint")}</p>
-            </div>
-            <Suspense fallback={<div className="h-56 animate-pulse rounded-2xl bg-surface-2" />}>
-              <CaptureForm />
+            <Suspense fallback={<div className="h-72 animate-pulse rounded-2xl bg-surface-2" />}>
+              <ReportSheet />
             </Suspense>
           </div>
         </div>
@@ -68,31 +66,10 @@ function Hero() {
           <Link href="/units" className="btn btn-gold min-h-13 px-7 text-base">
             {t("home.browse")} <ArrowRight aria-hidden className="size-5" />
           </Link>
-          <a href="#how" className="btn btn-outline-light min-h-13 px-7 text-base">
+          <a href="#live" className="btn btn-outline-light min-h-13 px-7 text-base">
             {t("home.howLink")}
           </a>
         </div>
-      </div>
-    </section>
-  );
-}
-
-/* ── Statement ────────────────────────────────────────────────────── */
-
-function Statement() {
-  const [a1, rest] = t("home.statement.a").split("{photo}");
-  const [a2, a3] = rest.split("{ballot}");
-  return (
-    <section id="how" className="panel scroll-mt-20 px-6 py-20 text-center md:px-12 md:py-32">
-      <div className="mx-auto flex max-w-4xl flex-col gap-10">
-        <p className="display text-[2rem] leading-[1.08] text-balance md:text-[3.4rem]">
-          {a1}
-          <EmojiTile emoji="📸" tilt={-8} />
-          {a2}
-          <EmojiTile emoji="🗳️" tilt={7} />
-          {a3}
-        </p>
-        <ScrollReveal text={t("home.statement.b")} className="display text-[2rem] leading-[1.08] text-brand md:text-[3.4rem]" />
       </div>
     </section>
   );
@@ -173,12 +150,12 @@ function PhotoBlob({ label, className, shape }: { label: string; className: stri
 
 type Row = { unit_results: { status: UnitStatus } | { status: UnitStatus }[] | null };
 
-/** Live "x of y verified" pill pinned to the witness illustration. */
+/** Live "x of y verified" pill pinned to the witness illustration. A unit counts once any of its elections is verified. */
 async function LiveCount() {
   await connection();
-  const { data } = await publicClient().from("polling_units").select("unit_results(status)").returns<Row[]>();
+  const { data } = await publicClient().from("polling_units").select("unit_results(status)").limit(5000).returns<Row[]>();
   if (!data?.length) return null;
-  const v = data.filter((u) => (Array.isArray(u.unit_results) ? u.unit_results[0] : u.unit_results)?.status === "verified").length;
+  const v = data.filter((u) => many(u.unit_results).some((r) => r.status === "verified")).length;
   return (
     <Link
       href="/units?status=verified"
@@ -209,7 +186,9 @@ function DemoPanel() {
           <h2 className="display text-4xl text-balance md:text-6xl">{t("home.demo.title")}</h2>
           <p className="mx-auto mt-4 max-w-md text-muted">{t("home.demo.body")}</p>
         </div>
-        <MatchDemo />
+        <UnitCompare>
+          <MatchDemo />
+        </UnitCompare>
       </div>
     </section>
   );

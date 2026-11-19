@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CloudOff, Loader2 } from "lucide-react";
+import { CircleAlert, CircleCheck, CloudOff, Loader2, MapPinPlus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import type { QueuedCapture } from "@/lib/schemas";
 
@@ -7,6 +7,8 @@ export function CaptureStatus({ item, online }: { item: QueuedCapture; online: b
   const { status } = item;
   if (status === "done")
     return <Line icon={<CircleCheck className="size-4" />} cls="text-ok-text" text={t("queue.done")} />;
+  if (status === "draft")
+    return <Line icon={<MapPinPlus className="size-4" />} cls="text-sim-text" text={t("queue.draft")} />;
   if (status === "failed")
     return <Line icon={<CircleAlert className="size-4" />} cls="text-review-text" text={item.error ?? t("queue.failed")} />;
   if (status === "queued" && !online)

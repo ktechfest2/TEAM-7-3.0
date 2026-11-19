@@ -5,13 +5,15 @@ import { ArrowRight, Fingerprint, ListChecks, LoaderCircle, ScanText, SearchX } 
 import { BackLink } from "@/components/BackLink";
 import { Card } from "@/components/Card";
 import { EmptyState } from "@/components/EmptyState";
-import { FiguresTable } from "@/components/FiguresTable";
+import { SheetReading } from "@/components/SheetReading";
 import { FlagList } from "@/components/FlagList";
 import { HashChip } from "@/components/HashChip";
+import { ReadAgainButton } from "@/components/ReadAgainButton";
 import { StatusBadge, WitnessMeter } from "@/components/StatusBadge";
+import { parseElection } from "@/lib/elections";
 import { formatTime, photoUrl } from "@/lib/format";
 import { t } from "@/lib/i18n";
-import { CheckFlags, ExtractedResult, type UnitStatus } from "@/lib/schemas";
+import { CheckFlags, type UnitStatus } from "@/lib/schemas";
 import { publicClient } from "@/lib/supabase/server";
 
 export default function ReviewPage({ params }: PageProps<"/review/[photoId]">) {
@@ -33,36 +35,45 @@ type PhotoRow = {
   captured_at: string;
   uploaded_at: string;
   sync_status: string;
-  polling_units: { id: string; code: string; name: string; unit_results: { status: UnitStatus; witness_count: number } | null };
+  unit_id: string;
+  election: string;
+  polling_units: { id: string; code: string; name: string; ward: string; lga: string; state: string };
   extracted_results: Record<string, unknown> | null;
 };
 
 async function Review({ params }: Pick<PageProps<"/review/[photoId]">, "params">) {
   await connection();
   const { photoId } = await params;
-  const { data: photo } = await publicClient()
+  const db = publicClient();
+  const { data: photo } = await db
     .from("result_photos")
     .select(
-      "id, image_url, sha256_hash, hash_verified, captured_at, uploaded_at, sync_status, polling_units(id, code, name, unit_results(status, witness_count)), extracted_results(*)",
+      "id, unit_id, election, image_url, sha256_hash, hash_verified, captured_at, uploaded_at, sync_status, polling_units(id, code, name, ward, lga, state), extracted_results(*)",
     )
     .eq("id", photoId)
     .maybeSingle<PhotoRow>();
 
   if (!photo) return <EmptyState icon={SearchX} title={t("review.notFound")} />;
+  const election = parseElection(photo.election);
+  const { data: unitResult } = await db
+    .from("unit_results")
+    .select("status, witness_count")
+    .eq("unit_id", photo.unit_id)
+    .eq("election", election)
+    .maybeSingle<{ status: UnitStatus; witness_count: number }>();
   const unit = photo.polling_units;
   const x = photo.extracted_results;
-  const result = x ? ExtractedResult.parse(x) : null;
   const flags = x ? CheckFlags.parse(x.check_flags) : [];
-  const status = unit.unit_results?.status ?? "pending";
+  const status = unitResult?.status ?? "pending";
 
   return (
     <>
       <header className="flex flex-col gap-1.5 animate-rise">
-        <span className="eyebrow">{unit.code}</span>
+        <span className="eyebrow">{unit.code} · {t(`election.${election}`)}</span>
         <h1 className="display text-4xl text-balance md:text-6xl">{t("review.title")}</h1>
       </header>
 
-      <Link href={`/units/${unit.code}`} className="card pressable flex flex-col gap-3 p-4">
+      <Link href={`/units/${unit.code}?election=${election}`} className="card pressable flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between gap-3">
           <span className="min-w-0">
             <span className="eyebrow block">{t("review.unitStatus")}</span>
@@ -71,7 +82,7 @@ async function Review({ params }: Pick<PageProps<"/review/[photoId]">, "params">
           <StatusBadge status={status} size="sm" />
         </div>
         <div className="flex items-center justify-between">
-          <WitnessMeter count={unit.unit_results?.witness_count ?? 0} status={status} />
+          <WitnessMeter count={unitResult?.witness_count ?? 0} status={status} />
           <span className="inline-flex items-center gap-1 text-sm font-semibold text-brand">
             {t("review.viewUnit")} <ArrowRight aria-hidden className="size-4" />
           </span>
@@ -80,16 +91,17 @@ async function Review({ params }: Pick<PageProps<"/review/[photoId]">, "params">
 
       <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-5">
-      {result ? (
+      {x ? (
         <>
           <Card title={t("review.numbers")} icon={ScanText}>
-            <FiguresTable result={result} />
+            <SheetReading raw={x.raw} fallback={x} unit={unit} />
             <p className="text-xs text-muted">
               {t("review.readBy", { model: String(x?.model), confidence: Math.round(Number(x?.ai_confidence ?? 0) * 100) })}
             </p>
           </Card>
           <Card title={t("review.checks")} icon={ListChecks}>
             <FlagList flags={flags} />
+            {flags.some((f) => f.severity === "blocking") && <ReadAgainButton photoId={photo.id} />}
           </Card>
         </>
       ) : (

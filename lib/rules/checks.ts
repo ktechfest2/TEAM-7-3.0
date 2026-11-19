@@ -10,6 +10,7 @@ export const sumScores = (scores: Record<string, number>) =>
 /** Flags impossible or unreadable numbers on one reading. Pure, no AI. */
 export function checkResult(r: ExtractedResult, meta: CheckMeta = {}): CheckFlag[] {
   if (meta.isResultSheet === false) return [{ code: "NOT_A_RESULT_SHEET", severity: "blocking" }];
+  if (meta.legible === false) return [{ code: "SHEET_ILLEGIBLE", severity: "blocking" }];
 
   const flags: CheckFlag[] = [];
   const missing = new Set<string>();

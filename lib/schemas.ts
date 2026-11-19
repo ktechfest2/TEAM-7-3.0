@@ -4,6 +4,7 @@
  * the JSONB shapes, API payloads, and the vision-model contract.
  */
 import { z } from "zod";
+import { Election } from "./elections";
 
 // ── Primitives ─────────────────────────────────────────────────────────
 export const PartyCode = z.string().regex(/^[A-Z0-9]{1,8}$/);
@@ -11,22 +12,37 @@ const Count = z.number().int().min(0).max(100_000);
 
 // ── Vision contract: the EXACT JSON the model must return ──────────────
 // Sent to the API as the structured-output schema, then re-validated here with safeParse
-// (the API's schema subset drops checks like max/regex). Rule for the model: if a figure
-// can't be read with certainty, return null. Never guess.
+// (the API's schema subset drops checks like max/regex). The model only transcribes: party
+// names come back as printed, scores in figures AND words, each with its own confidence.
+// lib/vision/map.ts turns this into the stored shape (party codes, unreadable fields,
+// words/figures conflicts). Key order follows the sheet, top to bottom, so the model reads
+// in that order.
+const Confidence = z.number().min(0).max(1);
+const Written = z.string().max(120).nullable();
+const Figure = z.object({
+  figures: Count.nullable(), // the digits as written; null if unreadable or blank
+  words: Written, // the words as written; null if not written or unreadable
+  confidence: Confidence,
+});
 export const VisionExtraction = z.object({
   is_result_sheet: z.boolean(),
   form_type: z.enum(["EC8A", "OTHER", "UNKNOWN"]),
-  polling_unit_code: z.string().max(40).nullable(),
-  registered_voters: Count.nullable(),
-  accredited_voters: Count.nullable(),
-  rejected_ballots: Count.nullable(),
-  total_valid_votes: Count.nullable(),
-  total_votes_cast: Count.nullable(),
-  party_scores: z.array(z.object({ party: PartyCode, votes: Count })).max(30),
-  unreadable_fields: z.array(z.string().max(40)).max(40), // field names or party codes
-  words_digits_conflicts: z.array(z.string().max(40)).max(40), // EC8A writes figures in words AND digits
-  confidence: z.number().min(0).max(1),
-  notes: z.string().max(300),
+  legible: z.boolean(),
+  unit: z.object({
+    state: Written,
+    lga: Written,
+    ward: Written,
+    polling_unit_name: Written,
+    polling_unit_code: Written,
+  }),
+  registered_voters: Figure,
+  accredited_voters: Figure,
+  party_scores: z.array(Figure.extend({ party: z.string().max(40) })).max(30),
+  rejected_ballots: Figure,
+  total_valid_votes: Figure,
+  total_votes_cast: Figure,
+  confidence: Confidence, // overall
+  notes: z.string().max(1000),
 });
 export type VisionExtraction = z.infer<typeof VisionExtraction>;
 
@@ -54,6 +70,8 @@ export const CheckCode = z.enum([
   "WORDS_DIGITS_CONFLICT", // figure in words ≠ figure in digits
   "LOW_CONFIDENCE", // model confidence below threshold
   "NOT_A_RESULT_SHEET",
+  "SHEET_ILLEGIBLE", // too blurry, cropped or dark to read
+  "UNIT_CODE_MISMATCH", // the PU code written on the sheet is not the unit the witness chose
 ]);
 export type CheckCode = z.infer<typeof CheckCode>;
 
@@ -78,6 +96,7 @@ export type CheckMeta = {
   unreadable?: string[];
   conflicts?: string[];
   isResultSheet?: boolean;
+  legible?: boolean;
 };
 
 // ── Consensus ──────────────────────────────────────────────────────────
@@ -98,10 +117,13 @@ export type PartyDiff = {
 };
 
 // ── API payloads (validated in route handlers) ─────────────────────────
-export const ExtractRequest = z.object({ photoId: z.uuid() });
+export const ExtractRequest = z.object({ photoId: z.uuid(), reread: z.boolean().optional() });
+
+export const CompareQuery = z.object({ code: z.string().min(1).max(40), election: Election });
 
 export const CollationInput = z.object({
   level: z.enum(["ward", "lga", "state", "national"]),
+  election: Election,
   areaCode: z.string().min(1).max(40),
   unitId: z.uuid().nullable(),
   partyScores: PartyScores,
@@ -127,11 +149,14 @@ export const MoveFlagInput = z.object({
 // ── Offline queue item (IndexedDB, browser only) ───────────────────────
 export type QueuedCapture = {
   localId: string;
-  unitId: string;
-  blob: Blob; // the compressed JPEG: exactly the bytes that were hashed
+  unitId: string; // "" when typed in offline by code: resolved from unitCode before upload
+  unitCode?: string;
+  election?: Election; // missing on captures queued before elections existed = presidential
+  // The photo (exactly the bytes that were hashed) lives in its own store: see getPhoto().
   sha256: string;
   capturedAt: string; // ISO, device clock
-  status: "queued" | "uploading" | "uploaded" | "extracting" | "done" | "failed";
+  // draft: taken offline without choosing a polling unit; waits for the witness to finish it.
+  status: "draft" | "queued" | "uploading" | "uploaded" | "extracting" | "done" | "failed";
   attempts: number;
   photoId?: string;
   error?: string;

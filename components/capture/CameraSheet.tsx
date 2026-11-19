@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CameraOff, Loader2, SwitchCamera, X } from "lucide-react";
+import { Camera, CameraOff, Loader2, SwitchCamera, X } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { fileToJpeg, frameToJpeg, type JpegPhoto } from "@/lib/image";
 
-type Props = { title?: string; onCapture: (photo: Blob) => void; onClose: () => void };
+type Props = { title?: string; onCapture: (photo: JpegPhoto) => void; onClose: () => void };
 
 /**
  * Full-screen live camera with a shutter button. Photos only ever come from here:
@@ -61,23 +62,19 @@ export function CameraSheet({ title, onCapture, onClose }: Props) {
     };
   }, [onClose]);
 
+  // The frame is scaled and encoded once, straight to the final JPEG: no decode step that
+  // Safari can fail on, and the bytes handed on are exactly what gets hashed and uploaded.
   function shoot() {
     const v = videoRef.current;
     if (!v || state !== "live" || !v.videoWidth) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    canvas.getContext("2d")!.drawImage(v, 0, 0);
     setFlash(true);
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return;
-        streamRef.current?.getTracks().forEach((tr) => tr.stop());
-        onCapture(blob);
-      },
-      "image/jpeg",
-      0.92,
-    );
+    try {
+      const photo = frameToJpeg(v, v.videoWidth, v.videoHeight);
+      streamRef.current?.getTracks().forEach((tr) => tr.stop());
+      onCapture(photo);
+    } catch {
+      setFlash(false);
+    }
   }
 
   return createPortal(
@@ -115,12 +112,35 @@ export function CameraSheet({ title, onCapture, onClose }: Props) {
         )}
 
         {(state === "denied" || state === "unsupported") && (
+          // The live camera isn't available here (plain-http link, permission refused, or an
+          // in-app browser): use the phone's own camera app instead. capture= opens the camera
+          // directly rather than the gallery on phones.
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8 text-center">
             <span className="grid size-16 place-items-center rounded-full bg-white/10">
               <CameraOff aria-hidden className="size-8" />
             </span>
-            <p className="max-w-xs text-base">{state === "denied" ? t("camera.denied") : t("camera.unsupported")}</p>
-            <button onClick={onClose} className="btn bg-white text-black">{t("camera.close")}</button>
+            <p className="max-w-xs text-base">{t("camera.fallback")}</p>
+            <label className="btn btn-gold min-h-14 cursor-pointer px-6 text-base">
+              <Camera aria-hidden className="size-5" /> {t("camera.useApp")}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setFlash(true);
+                  try {
+                    onCapture(await fileToJpeg(file));
+                  } catch {
+                    setFlash(false);
+                  }
+                }}
+              />
+            </label>
+            <button onClick={onClose} className="text-sm text-white/70 underline-offset-4 hover:underline">{t("camera.close")}</button>
           </div>
         )}
 

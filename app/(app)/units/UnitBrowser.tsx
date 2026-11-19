@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ChevronRight, Scale, Search, SearchX, Truck, X } from "lucide-react";
+import { ElectionTabs } from "@/components/ElectionTabs";
 import { StatusBadge, WitnessMeter } from "@/components/StatusBadge";
+import { electionLinks, type Election } from "@/lib/elections";
 import { t, type MessageKey } from "@/lib/i18n";
 import type { UnitStatus } from "@/lib/schemas";
 
@@ -31,7 +33,7 @@ const FILTERS: { key: Filter; label: MessageKey }[] = [
 const isFilter = (v: string | null): v is Filter => FILTERS.some((f) => f.key === v);
 
 /** Searchable, filterable list of polling units. */
-export function UnitBrowser({ units }: { units: UnitCardData[] }) {
+export function UnitBrowser({ units, election }: { units: UnitCardData[]; election: Election }) {
   const initial = useSearchParams().get("status");
   const [filter, setFilter] = useState<Filter>(isFilter(initial) ? initial : "all");
   const [query, setQuery] = useState("");
@@ -50,6 +52,7 @@ export function UnitBrowser({ units }: { units: UnitCardData[] }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-4">
+      <ElectionTabs value={election} links={electionLinks((e) => `/units?election=${e}${filter !== "all" ? `&status=${filter}` : ""}`)} />
       <div className="relative">
         <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-muted" />
         <input
@@ -101,7 +104,7 @@ export function UnitBrowser({ units }: { units: UnitCardData[] }) {
         <ul className="flex flex-col gap-3 stagger">
           {shown.map((u) => (
             <li key={u.id}>
-              <Link href={`/units/${u.code}`} className="card pressable flex h-full flex-col gap-3 p-4">
+              <Link href={`/units/${u.code}?election=${election}`} className="card pressable flex h-full flex-col gap-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-mono text-xs font-medium text-muted">{u.code}</p>
