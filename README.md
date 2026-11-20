@@ -7,7 +7,6 @@ don't match the wall.
 
 **AI reads · rules check · people confirm.** The app never accuses anyone: it reports that records don't match.
 
-> ⚠️ All demo data (units, parties PA–PD, results, collation figures) is **SIMULATED**.
 
 ## Setup
 
