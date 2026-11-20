@@ -2,7 +2,8 @@ import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import { apiT } from "@/lib/i18n/api";
 import { adminClient } from "@/lib/supabase/admin";
-import { parseIncidentMessage } from "@/lib/sms/incidents";
+import { formatIncidentLookupReply, parseIncidentLookupMessage, parseIncidentMessage } from "@/lib/sms/incidents";
+import { getRecentIncidentCounts } from "@/lib/sms/lookup";
 
 export async function POST(request: Request) {
   const tr = apiT(request);
@@ -16,6 +17,32 @@ export async function POST(request: Request) {
   const text = String(body.text ?? "").trim();
   if (!/^\+?[\d ()-]{7,24}$/.test(from) || !text || text.length > 500) {
     return NextResponse.json({ error: tr("api.badSms") }, { status: 400 });
+  }
+
+  const lookup = parseIncidentLookupMessage(text);
+  if (lookup) {
+    const db = adminClient();
+    const { data: unit, error: unitError } = await db
+      .from("polling_units")
+      .select("id, code")
+      .eq("code", lookup.unitCode)
+      .eq("is_simulated", false)
+      .eq("directory_is_current", true)
+      .maybeSingle();
+    if (unitError) {
+      console.error("Demo incident lookup failed", unitError.message);
+      return NextResponse.json({ error: "Polling unit lookup unavailable" }, { status: 503 });
+    }
+    if (!unit) {
+      return NextResponse.json({ ok: true, accepted: false, reply: tr("sms.unitNotFound", { code: lookup.unitCode }) });
+    }
+    try {
+      const counts = await getRecentIncidentCounts(unit.id);
+      return NextResponse.json({ ok: true, accepted: true, lookup: true, reply: formatIncidentLookupReply(unit.code, counts, true) });
+    } catch (error) {
+      console.error("Demo incident count lookup failed", error);
+      return NextResponse.json({ error: "Incident lookup unavailable" }, { status: 503 });
+    }
   }
 
   const parsed = parseIncidentMessage(text);

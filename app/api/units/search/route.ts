@@ -4,7 +4,7 @@ import { publicClient } from "@/lib/supabase/server";
 
 const SAFE = /^[\p{L}\p{N} .,'’&()/-]+$/u;
 
-/** Type-ahead search over every polling unit (real directory and simulated demo units). */
+/** Type-ahead search over real directory units. */
 export async function GET(req: Request) {
   const tr = apiT(req);
   await connection(); // per request, never prerendered at build time
@@ -16,8 +16,8 @@ export async function GET(req: Request) {
   const { data, error } = await publicClient()
     .from("polling_units")
     .select("id, code, name, ward, lga, state, is_simulated")
+    .eq("is_simulated", false)
     .or(`code.ilike.${pattern},name.ilike.${pattern},ward.ilike.${pattern},lga.ilike.${pattern}`)
-    .order("is_simulated", { ascending: false }) // demo units first: they have results to compare
     .order("code")
     .limit(8);
   if (error) {

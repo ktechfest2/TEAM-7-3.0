@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, Building2, Check, Clock, FileText, Globe, ImageUp, Loader2, MapPin, Megaphone, Plus, Scale, Send, TriangleAlert,
   type LucideIcon,
@@ -11,7 +11,7 @@ import { DoodlePattern } from "@/components/home/Sticker";
 import { HeroPanel, HeroTray } from "@/components/HeroPanel";
 import { normalizePuCode } from "@/lib/directory";
 import { ELECTION_STYLE } from "@/lib/election-style";
-import { DEFAULT_ELECTION, ELECTIONS, type Election } from "@/lib/elections";
+import { DEFAULT_ELECTION, ELECTIONS, parseElection, type Election } from "@/lib/elections";
 import { signed } from "@/lib/format";
 import { t, type MessageKey } from "@/lib/i18n";
 import { errorMessage, fetchJson, UserError } from "@/lib/http";
@@ -46,10 +46,15 @@ type Verdict = "checking" | "unavailable" | "waiting" | "enter" | "match" | "dif
  */
 export function CollationForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const initialCode = params.get("unitCode");
+  const irevElectionId = params.get("irevElectionId");
+  const irevPuId = params.get("irevPuId");
+  const irevMode = !!(irevElectionId && irevPuId);
   const online = useOnline();
-  const picker = useUnitPicker(online);
+  const picker = useUnitPicker(online, initialCode);
   const { unitId, unitCode, unitName } = picker.selection;
-  const [election, setElection] = useState<Election>(DEFAULT_ELECTION);
+  const [election, setElection] = useState<Election>(() => parseElection(params.get("election") ?? DEFAULT_ELECTION));
   const [wall, setWall] = useState<{ key: string; value: Wall | "failed" } | null>(null);
   const [wallAttempt, setWallAttempt] = useState(0);
   const [scores, setScores] = useState<Record<string, string>>({});
@@ -60,6 +65,7 @@ export function CollationForm() {
   const [readNote, setReadNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const irevImportStarted = useRef(false);
 
   // The verified wall result for this unit and election, shown beside each figure.
   const wallKey = unitCode ? `${unitCode}/${election}` : "";
@@ -80,33 +86,29 @@ export function CollationForm() {
   const parties = [...new Set([...base, ...extra])];
   const newCode = newParty.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 
-  // Compared exactly as the server does: only parties with a figure are sent, a blank counts as 0.
+  // Blank parties are unknown for this analysis. Never turn an omitted party into a zero.
   const entered = Object.fromEntries(parties.filter((p) => scores[p]).map((p) => [p, Number(scores[p])]));
   const anyEntered = Object.keys(entered).length > 0;
-  const diffs = wallScores && anyEntered ? diffScores(wallScores, entered) : null;
+  const comparable = wallScores && anyEntered
+    ? Object.fromEntries(Object.entries(entered).filter(([p]) => Object.hasOwn(wallScores, p)))
+    : {};
+  const comparableWall = wallScores
+    ? Object.fromEntries(Object.keys(comparable).map((p) => [p, wallScores[p]]))
+    : {};
+  const diffs = wallScores && Object.keys(comparable).length ? diffScores(comparableWall, comparable) : null;
   const diffBy = new Map(diffs?.map((d) => [d.party, d]));
   const differing = diffs?.filter((d) => d.difference !== 0) ?? [];
   const gap = differing.reduce((s, d) => s + Math.abs(d.difference), 0);
-  const announcedTotal = Object.values(entered).reduce((s, n) => s + n, 0);
-  const wallTotal = wallScores ? Object.values(wallScores).reduce((s, n) => s + n, 0) : null;
+  const announcedTotal = Object.values(comparable).reduce((s, n) => s + n, 0);
+  const wallTotal = wallScores && Object.keys(comparable).length
+    ? Object.keys(comparable).reduce((s, p) => s + (wallScores[p] ?? 0), 0)
+    : null;
 
-  const verdict: Verdict = wallFailed ? "unavailable" : !current ? "checking" : !wallScores ? "waiting" : !anyEntered ? "enter" : differing.length ? "differ" : "match";
+  const verdict: Verdict = wallFailed ? "unavailable" : !current ? "checking" : !wallScores ? "waiting" : !Object.keys(comparable).length ? "enter" : differing.length ? "differ" : "match";
   const style = ELECTION_STYLE[election];
 
-  function reset() {
-    setScores({});
-    setExtra([]);
-    setReadNote(null);
-    setError(null);
-  }
-
-  function addParty() {
-    if (newCode && !parties.includes(newCode)) setExtra((x) => [...x, newCode]);
-    setNewParty("");
-  }
-
   /** Reads the figures from a screenshot / photo of the official result and fills the boxes. */
-  async function readPicture(file: File) {
+  async function readPicture(file: File, requireUnitMatch = false) {
     setReading(true);
     setError(null);
     setReadNote(null);
@@ -121,10 +123,15 @@ export function CollationForm() {
       const body = (await res.json().catch(() => ({}))) as { error?: string; partyScores?: Record<string, number>; unitCode?: string | null; notes?: string };
       if (!res.ok || !body.partyScores) throw new UserError(body.error ?? t("collation.readFailed"));
       const read = body.partyScores;
-      setExtra((x) => [...new Set([...x, ...Object.keys(read).filter((p) => !base.includes(p))])]);
-      setScores(Object.fromEntries(Object.entries(read).map(([p, v]) => [p, String(v)])));
       const onPicture = body.unitCode ? normalizePuCode(body.unitCode) : null;
       const chosen = unitCode ? normalizePuCode(unitCode) ?? unitCode : null;
+      if (requireUnitMatch && (!onPicture || !chosen || onPicture !== chosen)) {
+        setScores({});
+        setExtra([]);
+        throw new Error(onPicture ? t("collation.readOtherUnit", { code: onPicture }) : t("collation.irevUnitUnreadable"));
+      }
+      setExtra((x) => [...new Set([...x, ...Object.keys(read).filter((p) => !base.includes(p))])]);
+      setScores(Object.fromEntries(Object.entries(read).map(([p, v]) => [p, String(v)])));
       setReadNote(
         onPicture && chosen && onPicture !== chosen
           ? t("collation.readOtherUnit", { code: onPicture })
@@ -137,11 +144,53 @@ export function CollationForm() {
     }
   }
 
+  // Import the selected INEC IReV document through our same-origin proxy and read it with
+  // the existing vision endpoint. This remains an on-screen analysis and is never saved as
+  // an official/announced record.
+  useEffect(() => {
+    if (!irevMode || irevImportStarted.current || !unitCode) return;
+    irevImportStarted.current = true;
+    setSource("INEC IReV");
+    setReadNote(t("collation.irevLoading"));
+    void (async () => {
+      try {
+        const query = new URLSearchParams({ electionId: irevElectionId!, pu: irevPuId! });
+        const response = await fetch(`/api/irev/sheet?${query}`);
+        if (!response.ok) throw new Error(t("collation.readFailed"));
+        const blob = await response.blob();
+        if (!blob.type.startsWith("image/")) throw new Error(t("collation.irevPdf"));
+        const file = new File([blob], "irev-result", { type: blob.type });
+        await readPicture(file, true);
+      } catch (e) {
+        setReadNote(null);
+        setError(e instanceof Error ? e.message : t("collation.readFailed"));
+      }
+    })();
+  // Query parameters are immutable for this page visit; the ref prevents duplicate imports.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irevMode, unitCode]);
+
+  function reset() {
+    setScores({});
+    setExtra([]);
+    setReadNote(null);
+    setError(null);
+  }
+
+  function addParty() {
+    if (newCode && !parties.includes(newCode)) setExtra((x) => [...x, newCode]);
+    setNewParty("");
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (irevMode) return setError(t("collation.irevAnalysisOnly"));
     if (!unitId) return;
     setError(null);
     if (!anyEntered) return setError(t("collation.empty"));
+    if (wallScores && Object.keys(wallScores).some((p) => !Object.hasOwn(entered, p))) {
+      return setError(t("collation.completeForSaving"));
+    }
     setBusy(true);
     if (!(await ensureSession())) {
       setBusy(false);
@@ -234,21 +283,27 @@ export function CollationForm() {
                   <MapPin aria-hidden className="size-3.5" /> {[picker.ward, picker.lga, picker.state].filter(Boolean).join(" · ")}
                 </span>
               </div>
-              <label className={`btn btn-gold min-h-11 cursor-pointer px-4 text-sm ${reading ? "pointer-events-none opacity-60" : ""}`}>
-                {reading ? <Loader2 aria-hidden className="size-4 animate-spin" /> : <ImageUp aria-hidden className="size-4" />}
-                {reading ? t("collation.reading") : t("collation.fromPicture")}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  disabled={reading}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) void readPicture(file);
-                  }}
-                />
-              </label>
+              <div className="flex flex-wrap gap-2">
+                {irevMode && <a
+                  href={`/api/irev/sheet?${new URLSearchParams({ electionId: irevElectionId!, pu: irevPuId!, download: "1" })}`}
+                  className="btn btn-secondary min-h-11 px-4 text-sm"
+                >{t("irev.download")}</a>}
+                <label className={`btn btn-gold min-h-11 cursor-pointer px-4 text-sm ${reading ? "pointer-events-none opacity-60" : ""}`}>
+                  {reading ? <Loader2 aria-hidden className="size-4 animate-spin" /> : <ImageUp aria-hidden className="size-4" />}
+                  {reading ? t("collation.reading") : t("collation.fromPicture")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    disabled={reading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void readPicture(file, irevMode);
+                    }}
+                  />
+                </label>
+              </div>
             </header>
 
             {readNote && (
@@ -302,7 +357,7 @@ export function CollationForm() {
             <div className="mx-4 mt-2 grid grid-cols-[minmax(0,1fr)_4.5rem_minmax(0,7.5rem)_4.5rem] items-center gap-x-3 border-t border-dashed border-border px-2 py-3 md:mx-5 md:grid-cols-[minmax(0,1fr)_6rem_10rem_6rem]">
               <span className="text-sm font-bold">{t("collation.total")}</span>
               <span className="text-right font-mono text-sm font-semibold tabular-nums">{wallTotal === null ? "—" : fmt(wallTotal)}</span>
-              <span className="text-center font-mono text-lg font-bold tabular-nums">{anyEntered ? fmt(announcedTotal) : "—"}</span>
+              <span className="text-center font-mono text-lg font-bold tabular-nums">{Object.keys(comparable).length ? fmt(announcedTotal) : "—"}</span>
               <GapBadge diff={wallTotal !== null && anyEntered ? announcedTotal - wallTotal : undefined} />
             </div>
 
@@ -354,7 +409,8 @@ export function CollationForm() {
 
             {error && <p role="alert" className="rounded-2xl bg-review-bg p-4 text-sm text-review-text">{error}</p>}
 
-            <button disabled={busy || reading} className="btn btn-primary min-h-14 text-base">
+            {irevMode && <p role="status" className="rounded-xl bg-surface-2 p-3 text-sm text-muted">{t("collation.irevAnalysisOnly")}</p>}
+            <button disabled={busy || reading || irevMode} className="btn btn-primary min-h-14 text-base">
               {busy ? <Loader2 aria-hidden className="size-5 animate-spin" /> : <Send aria-hidden className="size-5" />}
               {busy ? t("common.saving") : t("collation.submit")}
             </button>

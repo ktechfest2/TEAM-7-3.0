@@ -20,9 +20,11 @@ export async function loadUnits(query: UnitsQuery): Promise<UnitsPage> {
    * mismatch against the announced figures; mismatch = the announced figures disagree.
    */
   async function loadIds(): Promise<Ids | null> {
-    const embed = search || state ? ", polling_units!inner(id)" : "";
+    const embed = ", polling_units!inner(id)";
     let verifiedQ = db.from("unit_results").select(`unit_id${embed}`).eq("election", election).eq("status", "verified");
     let mismatchQ = db.from("discrepancies").select(`unit_id${embed}`).eq("election", election);
+    verifiedQ = verifiedQ.eq("polling_units.is_simulated", false);
+    mismatchQ = mismatchQ.eq("polling_units.is_simulated", false);
     if (search) {
       verifiedQ = verifiedQ.or(search, { referencedTable: "polling_units" });
       mismatchQ = mismatchQ.or(search, { referencedTable: "polling_units" });
@@ -44,6 +46,7 @@ export async function loadUnits(query: UnitsQuery): Promise<UnitsPage> {
   /** Polling units narrowed to the search, the state and (optionally) a set of ids. */
   function units(only: string[] | null, opts: { head?: boolean } = {}) {
     let b = db.from("polling_units").select(COLUMNS, { count: "exact", head: opts.head });
+    b = b.eq("is_simulated", false);
     if (only) b = b.in("id", only);
     if (search) b = b.or(search);
     if (state) b = b.eq("state", state);
@@ -66,7 +69,6 @@ export async function loadUnits(query: UnitsQuery): Promise<UnitsPage> {
     only?.length === 0
       ? { data: [], count: 0, error: null }
       : units(only)
-          .order("is_simulated", { ascending: false }) // demo units first: they carry results
           .order(query.sort)
           .order("code")
           .range((pageNo - 1) * query.size, pageNo * query.size - 1)
