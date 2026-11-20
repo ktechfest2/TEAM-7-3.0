@@ -8,6 +8,8 @@ CounTrack turns photos of the result sheet posted at a polling unit into time-st
 
 Built by Team 7 for KTechFest.
 
+**Live app:** [https://countrack-production.up.railway.app](https://countrack-production.up.railway.app)
+
 ## The Problem
 
 At 4:15 PM, counting ends at a polling unit in Ikeja. The presiding officer pastes the result sheet (Form EC8A) on the wall. Tunde, a voter, takes a photo. So do a party agent and a neighbour.
@@ -62,7 +64,7 @@ Anyone enters the announced figure → CounTrack shows every gap, party by party
 
 ## Key Features
 
-- **Capture.** Pick the state, LGA, ward and polling unit from INEC's directory of ~176,000 units, then take the photo in the app's own camera. The election type (presidential down to councillorship) is chosen with tabs.
+- **Capture.** Pick the state, LGA, ward and polling unit from ~176,000 units (from the open-source [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) snapshot of INEC's public directory), then take the photo in the app's own camera. The election type (presidential down to councillorship) is chosen with tabs.
 - **Tamper-evident photos.** Every photo carries a SHA-256 fingerprint taken on the phone and checked again on the server.
 - **Offline first.** Photos are saved on the phone and upload automatically when the connection returns. Without a connection, a photo can be saved as a draft and assigned to a unit later.
 - **Verification by agreement.** A unit is verified when two or more distinct witnesses submit identical readings, and they outnumber any disagreeing group. A single clear EC8A can stand on its own after five hours if nothing contradicts it.
@@ -120,6 +122,12 @@ There are no user accounts. Nobody signs in, so witnesses stay anonymous.
 - An admin can remove an item from the home page's "What's happening" feed by entering the passcode set in `ADMIN_DELETE_KEY`. The record itself is kept.
 - Incident reports are stored as unreviewed, and can be dismissed in the database.
 
+## Try the Demo
+
+**Live app: [https://countrack-production.up.railway.app](https://countrack-production.up.railway.app)**
+
+No account is needed. Everything in the demo database is simulated. Open it on a phone to try the camera and offline mode.
+
 | Unit | Status | What it shows |
 |---|---|---|
 | `SIM-001`, `SIM-002` | Verified | Wall and announced figures match |
@@ -142,7 +150,9 @@ There are no user accounts. Nobody signs in, so witnesses stay anonymous.
 - **Styling:** Tailwind CSS v4
 - **Database, storage and auth:** Supabase (Postgres, Storage, anonymous auth, row-level security)
 - **AI:** DeepSeek vision model, behind server routes
-- **Election data:** INEC's IReV results API and CVR polling unit directory
+- **Polling unit data:** the open-source [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) dataset, a community-maintained snapshot of INEC's public polling unit directory
+- **Result sheets:** INEC's IReV results portal
+- **Hosting:** Railway ([countrack-production.up.railway.app](https://countrack-production.up.railway.app))
 - **Offline:** a service worker (`public/sw.js`) and IndexedDB (via `idb`)
 - **SMS:** Africa's Talking sandbox
 - **Testing:** Vitest
@@ -179,7 +189,7 @@ Requires Node.js 22 or later.
    ```
    Open http://localhost:3000.
 7. **Test on a phone.** The camera and offline mode need HTTPS. Run `npm run preview`, then `npm run tunnel` in a second terminal, and open the `https://…trycloudflare.com` address it prints.
-8. **Deploy** to Vercel or any Node host (`npm run build`, then `npm start`). Add the same environment variables in the host's settings. Your local `.env` isn't used in production.
+8. **Deploy.** The live app runs on Railway: build with `npm run build`, start with `npm start`. Vercel or any Node host works the same way. Add the same environment variables in the host's settings. Your local `.env` isn't used in production.
 
 | Command | What it does |
 |---|---|
@@ -248,6 +258,19 @@ tests/               Vitest tests
 
 As required by rule 1.2, these are the open-source libraries, public APIs, pre-trained AI models and public datasets CounTrack uses.
 
+### Main open-source source: `nigeria-inec-geo`
+
+CounTrack's polling unit data comes from [**nigeria-inec-geo**](https://github.com/saidiadegoke/nigeria-inec-geo) by saidiadegoke, a community-maintained, open-source dataset that snapshots INEC's public polling unit directory (~176,000 units across every state, LGA and ward). **It is an open-source dataset, not an official INEC API.**
+
+It powers:
+
+- The State → LGA → Ward → Polling unit picker on Capture and Collation
+- The `/units` directory, search and filters
+- The unit list saved on the phone for offline use
+- Checking the polling unit code in SMS incident reports
+
+`npm run import:polling-units` (`scripts/import-polling-units.ts`) loads it into Supabase. It pins the dataset to a Git commit (`INEC_DATASET_REF`) and checks row counts, codes and duplicates. See that repository for its licence, and check records against INEC before relying on them.
+
 ### Pre-trained AI models
 
 | Model | Provider | Used for |
@@ -260,15 +283,14 @@ As required by rule 1.2, these are the open-source libraries, public APIs, pre-t
 |---|---|---|
 | [Claude](https://www.anthropic.com/claude), through [Claude Code](https://claude.com/claude-code) | Anthropic | Help writing, reviewing and debugging code, translations and documentation during development. Every change was reviewed by the team. Claude is not part of the running app. |
 
-### INEC open data and APIs
+### INEC public data
 
-CounTrack is built on public data from the [Independent National Electoral Commission (INEC)](https://inecnigeria.org). Each source powers specific features:
+CounTrack also reads public data from the [Independent National Electoral Commission (INEC)](https://inecnigeria.org) directly:
 
 | INEC source | Features that use it | Where in the code |
 |---|---|---|
 | [IReV, the Result Viewing portal](https://www.inecelectionresults.ng) results API | The `/irev` browser (election type → election → state → LGA → ward → polling unit), and INEC's uploaded result beside CounTrack's witness-verified result | `lib/irev/client.ts`, `app/api/irev/route.ts` |
 | IReV result-sheet storage | Viewing and downloading the EC8A sheet INEC uploaded for a unit, streamed through CounTrack (INEC's hosts only, images and PDFs only) | `app/api/irev/sheet/route.ts` |
-| [INEC Continuous Voter Registration (CVR) polling unit directory](https://cvr.inecnigeria.org/pu) | The State → LGA → Ward → Polling unit picker on Capture and Collation, the `/units` directory and search, the offline unit list, and checking the code in SMS incident reports | `scripts/import-polling-units.ts`, `app/api/polling-units/` |
 | INEC's list of registered political parties (2023 general elections) | A hint for reading handwritten party names on result sheets | `lib/parties.ts` |
 
 The IReV backend address can be changed with `IREV_API_BASE` if INEC moves it. CounTrack only reads public INEC data; it never writes to INEC systems.
@@ -287,7 +309,7 @@ The IReV backend address can be changed with `IREV_API_BASE` if INEC moves it. C
 
 | Dataset | Used for |
 |---|---|
-| [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) by saidiadegoke | The snapshot of INEC's CVR polling unit directory (~176,000 units) that `npm run import:polling-units` loads. See that repository for its licence. Check records against INEC before relying on them. |
+| [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) by saidiadegoke | All polling unit data (see "Main open-source source" above). Open-source and community-maintained, not an official INEC API. |
 
 ### Open-source libraries
 
