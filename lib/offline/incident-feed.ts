@@ -1,4 +1,5 @@
 import type { FeedEvent } from "@/lib/feed";
+import { INCIDENT_ACTIVE_WINDOW_MS } from "@/lib/sms/incidents";
 
 type IncidentEvent = Extract<FeedEvent, { kind: "incident" }>;
 type Snapshot = { savedAt: number; events: IncidentEvent[] };
@@ -25,7 +26,9 @@ export function saveIncidentFeed(events: FeedEvent[]): Snapshot | null {
   if (typeof window === "undefined") return null;
   const snapshot = {
     savedAt: Date.now(),
-    events: events.filter((event): event is IncidentEvent => event.kind === "incident"),
+    events: events.filter((event): event is IncidentEvent =>
+      event.kind === "incident" && Date.now() - Date.parse(event.at) < INCIDENT_ACTIVE_WINDOW_MS,
+    ),
   };
   try {
     window.localStorage.setItem(KEY, JSON.stringify(snapshot));
@@ -42,7 +45,12 @@ export function readIncidentFeed(): Snapshot | null {
     if (!value || typeof value !== "object") return null;
     const snapshot = value as { savedAt?: unknown; events?: unknown };
     if (typeof snapshot.savedAt !== "number" || !Array.isArray(snapshot.events)) return null;
-    return { savedAt: snapshot.savedAt, events: snapshot.events.filter(isIncidentEvent) };
+    return {
+      savedAt: snapshot.savedAt,
+      events: snapshot.events.filter((event): event is IncidentEvent =>
+        isIncidentEvent(event) && Date.now() - Date.parse(event.at) < INCIDENT_ACTIVE_WINDOW_MS,
+      ),
+    };
   } catch {
     return null;
   }

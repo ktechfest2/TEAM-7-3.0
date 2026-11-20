@@ -8,6 +8,9 @@ export const INCIDENTS = {
 
 export type IncidentCode = keyof typeof INCIDENTS;
 
+/** Reports older than this are omitted from live incident lookups and feeds. */
+export const INCIDENT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** Accepts the compact card format and readable variants, optionally after a shared-code keyword. */
 export function parseIncidentMessage(input: string): { unitCode: string; incidentCode: IncidentCode } | null {
   const normalized = input.trim().toUpperCase().replace(/\s+/g, " ");

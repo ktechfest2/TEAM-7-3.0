@@ -4,9 +4,7 @@ import { connection } from "next/server";
 import { ArrowRight, ArrowUpRight, Fingerprint } from "lucide-react";
 import { ReportSheet } from "@/components/capture/ReportSheet";
 import { LiveFeed } from "@/components/home/LiveFeed";
-import { MatchDemo } from "@/components/home/MatchDemo";
 import { DoodlePattern, SpinSticker } from "@/components/home/Sticker";
-import { UnitCompare } from "@/components/home/UnitCompare";
 import { QueueBadge } from "@/components/QueueBadge";
 import { t, type MessageKey } from "@/lib/i18n";
 import { requestLang } from "@/lib/i18n/server";
@@ -25,7 +23,6 @@ export default function Home() {
           <SealPanel />
           <WitnessPanel />
         </div>
-        <DemoPanel />
         <RolesPanel />
       </div>
     </>
@@ -155,7 +152,7 @@ type Row = { unit_results: { status: UnitStatus } | { status: UnitStatus }[] | n
 async function LiveCount() {
   await connection();
   const pageLang = await requestLang();
-  const { data } = await publicClient().from("polling_units").select("unit_results(status)").limit(5000).returns<Row[]>();
+  const { data } = await publicClient().from("polling_units").select("unit_results(status)").eq("is_simulated", false).limit(5000).returns<Row[]>();
   if (!data?.length) return null;
   const v = data.filter((u) => many(u.unit_results).some((r) => r.status === "verified")).length;
   return (
@@ -173,28 +170,6 @@ async function LiveCount() {
 }
 
 /* ── Interactive demo ─────────────────────────────────────────────── */
-
-function DemoPanel() {
-  return (
-    <section className="relative overflow-hidden rounded-[1.75rem] bg-brand px-3 py-14 md:rounded-[2.25rem] md:px-10 md:py-24">
-      <DoodlePattern id="demo-doodles" className="text-white opacity-[0.12]" />
-      {/* Confetti shapes */}
-      <span aria-hidden className="absolute top-10 left-[8%] size-16 rotate-12 rounded-2xl bg-accent md:size-24" />
-      <span aria-hidden className="absolute right-[6%] bottom-12 size-20 rounded-full bg-blush md:size-28" />
-      <span aria-hidden className="absolute top-[45%] right-[12%] hidden size-10 rotate-45 bg-pop md:block" />
-
-      <div className="relative mx-auto max-w-4xl rounded-[2rem] bg-bg px-5 py-10 md:rounded-[3rem] md:px-14 md:py-16">
-        <div className="mb-10 text-center">
-          <h2 className="display text-4xl text-balance md:text-6xl">{t("home.demo.title")}</h2>
-          <p className="mx-auto mt-4 max-w-md text-muted">{t("home.demo.body")}</p>
-        </div>
-        <UnitCompare>
-          <MatchDemo />
-        </UnitCompare>
-      </div>
-    </section>
-  );
-}
 
 /* ── Roles ────────────────────────────────────────────────────────── */
 

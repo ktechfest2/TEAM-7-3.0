@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AreaResponse, DirectoryTree, TreeResponse } from "../directory";
-import { browserClient } from "../supabase/browser";
 import {
-  cacheUnits, cachedUnits, cachedUnitsInWard, getAreaMeta, getTreeMeta, putMeta,
+  cacheUnits, cachedUnitsInWard, getAreaMeta, getTreeMeta, putMeta,
   type AreaMeta, type CachedUnit, type TreeMeta,
 } from "./queue";
 
@@ -12,7 +11,6 @@ import {
  * The polling-unit directory, usable offline:
  *  - the State → LGA → Ward tree is downloaded once and kept on the phone (refreshed daily);
  *  - choosing a state while online saves every unit in that state, so any ward in it works offline;
- *  - simulated demo units are cached too.
  */
 const TREE_MAX_AGE = 24 * 3600_000;
 const AREA_MAX_AGE = 7 * 24 * 3600_000;
@@ -49,48 +47,28 @@ export function saveStateOffline(state: string): Promise<AreaMeta> {
   return p;
 }
 
-/** Adds cached units (e.g. simulated demo units) to the tree so they can be picked offline too. */
-function withUnits(tree: DirectoryTree, units: CachedUnit[]): DirectoryTree {
-  const out: DirectoryTree = { ...tree };
-  for (const u of units) {
-    if (!u.state || !u.lga || tree[u.state]) continue; // real states already have every ward
-    const wards = ((out[u.state] ??= {})[u.lga] ??= []);
-    if (!wards.includes(u.ward)) wards.push(u.ward);
-  }
-  return out;
-}
-
 /** The tree from the phone, refreshed from the server when online and older than a day. */
 export function useDirectoryTree(online: boolean) {
   const [real, setReal] = useState<TreeMeta | null>(null);
-  const [extra, setExtra] = useState<CachedUnit[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [meta, units] = await Promise.all([getTreeMeta(), cachedUnits()]);
+      const meta = await getTreeMeta();
       if (!active) return;
       if (meta) setReal(meta);
-      setExtra(units.filter((u) => u.code.startsWith("SIM-")));
       setLoaded(true);
       if (!online) return;
       if (!meta || Date.now() - meta.savedAt > TREE_MAX_AGE) {
         const fresh = await refreshTree();
         if (active && fresh) setReal(fresh);
       }
-      // Simulated demo units are not in the real directory: keep them cached as before.
-      const { data } = await browserClient().from("polling_units").select("id, code, name, ward, lga, state").eq("is_simulated", true).order("code");
-      if (active && data?.length) {
-        await cacheUnits(data as CachedUnit[], false);
-        setExtra(data as CachedUnit[]);
-      }
     })();
     return () => { active = false; };
   }, [online]);
 
-  const tree = useMemo(() => withUnits(real?.tree ?? {}, extra), [real, extra]);
-  return { tree, hasRealTree: !!real, loaded, isReal: (state: string) => !!real?.tree[state] };
+  return { tree: real?.tree ?? {}, hasRealTree: !!real, loaded, isReal: (state: string) => !!real?.tree[state] };
 }
 
 /** Units in one ward: instantly from the phone, then refreshed from the server when online. */

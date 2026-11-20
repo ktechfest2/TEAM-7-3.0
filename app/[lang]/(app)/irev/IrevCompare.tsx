@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowUpRight, Camera, Download, ExternalLink, FileText, ImageOff, Users } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { ArrowLeft, ArrowUpRight, Camera, Download, ExternalLink, FileText, ImageOff, Users, Scale } from "lucide-react";
 import { DiffTable } from "@/components/DiffTable";
 import { StatusBadge, WitnessMeter } from "@/components/StatusBadge";
 import type { Election } from "@/lib/elections";
@@ -26,6 +27,8 @@ type Props = { electionId: string; puId: string; election: Election; unit: IrevU
 
 /** One polling unit: INEC's IReV upload on the left, CounTrack's witness record on the right. */
 export function IrevCompare({ electionId, puId, election, unit: listed, onBack }: Props) {
+  const pathname = usePathname();
+  const lang = pathname.split("/").filter(Boolean)[0] || "en";
   // Opened from a shared link the ward list may not be loaded yet, so fetch the unit on its own.
   const single = useFetch<IrevUnitResponse>(listed ? null : `/api/irev?${new URLSearchParams({ level: "unit", electionId, pu: puId })}`);
   const unit = listed ?? single.body?.data ?? null;
@@ -60,6 +63,12 @@ export function IrevCompare({ electionId, puId, election, unit: listed, onBack }
             </div>
             {unit.documentUrl && (
               <div className="flex shrink-0 gap-2">
+                {code && <Link
+                  href={`/${lang}/collation?${new URLSearchParams({ election, unitCode: code, irevElectionId: electionId, irevPuId: unit.id })}`}
+                  className="btn min-h-10 bg-brand px-3.5 text-sm text-brand-ink hover:opacity-90"
+                >
+                  <Scale aria-hidden className="size-4" /> {t("irev.compareInCounTrack")}
+                </Link>}
                 <a
                   href={`/api/irev/sheet?${new URLSearchParams({ electionId, pu: unit.id, download: "1" })}`}
                   className="btn min-h-10 bg-e-ink px-3.5 text-sm text-white hover:opacity-90"

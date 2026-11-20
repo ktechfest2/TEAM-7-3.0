@@ -6,7 +6,7 @@ import { recomputeMaturedUnits } from "@/lib/server/recompute";
 import { publicClient } from "@/lib/supabase/server";
 
 const LIMIT = 15;
-const UNIT = "polling_units(code, name, ward, lga, state)";
+const UNIT = "polling_units!inner(code, name, ward, lga, state, is_simulated)";
 const one = <T,>(x: T | T[] | null): T | null => (Array.isArray(x) ? (x[0] ?? null) : x);
 
 type PhotoRow = { id: string; uploaded_at: string; election: Election; image_url: string; sha256_hash: string; polling_units: FeedUnit | FeedUnit[] | null; extracted_results: { id: string } | { id: string }[] | null };
@@ -31,6 +31,9 @@ export async function GET(req: Request) {
   let photosQ = db.from("result_photos").select(`id, uploaded_at, election, image_url, sha256_hash, ${UNIT}, extracted_results(id)`);
   let resultsQ = db.from("unit_results").select(`id, updated_at, verified_at, status, election, witness_count, ${UNIT}`).in("status", ["verified", "flagged"]);
   let diffsQ = db.from("discrepancies").select(`id, detected_at, election, party, wall_votes, announced_votes, ${UNIT}`);
+  photosQ = photosQ.eq("polling_units.is_simulated", false);
+  resultsQ = resultsQ.eq("polling_units.is_simulated", false);
+  diffsQ = diffsQ.eq("polling_units.is_simulated", false);
   if (election) {
     photosQ = photosQ.eq("election", election);
     resultsQ = resultsQ.eq("election", election);
