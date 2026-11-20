@@ -254,6 +254,12 @@ As required by rule 1.2, these are the open-source libraries, public APIs, pre-t
 |---|---|---|
 | DeepSeek-V4.1-Flash (`deepseek-flash`) | [DeepSeek](https://www.deepseek.com) | Reading result sheets and announced figures from photos |
 
+### AI coding assistants
+
+| Tool | Provider | Used for |
+|---|---|---|
+| [Claude](https://www.anthropic.com/claude), through [Claude Code](https://claude.com/claude-code) | Anthropic | Help writing, reviewing and debugging code, translations and documentation during development. Every change was reviewed by the team. Claude is not part of the running app. |
+
 ### INEC open data and APIs
 
 CounTrack is built on public data from the [Independent National Electoral Commission (INEC)](https://inecnigeria.org). Each source powers specific features:
