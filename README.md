@@ -265,6 +265,7 @@ As required by rule 1.2, these are the open-source libraries, public APIs, pre-t
 | Tool | Provider | Used for |
 |---|---|---|
 | [Claude](https://www.anthropic.com/claude), through [Claude Code](https://claude.com/claude-code) | Anthropic | Help writing, reviewing and debugging code, translations and documentation during development. Every change was reviewed by the team. Claude is not part of the running app. |
+| [Codex](https://openai.com/codex/) | OpenAI | Help writing, reviewing and debugging code and documentation during development. Every change was reviewed by the team. Codex is not part of the running app. |
 
 ### INEC open data and APIs
 
