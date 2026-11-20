@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, MessageSquareWarning, Radio, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, MessageSquareWarning, Radio, RefreshCw, Search, Send } from "lucide-react";
 import { HeroPanel, HeroTray } from "@/components/HeroPanel";
 import { t } from "@/lib/i18n";
 
@@ -121,6 +121,14 @@ export function IncidentSandbox() {
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={!sampleUnit}
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand/15 px-3 py-1.5 font-mono text-xs font-bold text-brand transition hover:bg-brand/25 disabled:opacity-50"
+                onClick={() => setMessage(`LKP PU${sampleUnit}`)}
+              >
+                <Search aria-hidden className="size-3.5" /> LKP · look up unit
+              </button>
               {incidentCodes.map((code) => (
                 <button
                   key={code}
@@ -133,7 +141,7 @@ export function IncidentSandbox() {
                 </button>
               ))}
               <p className="text-xs text-muted">
-                {sampleUnit ? <>Sample uses directory polling unit <code>{sampleUnit}</code>. Codes: VUB vote buying · VIO violence · MSB staff misbehaviour · BOG ballot grabbing · INT intimidation.</> : "Loading a sample polling-unit code from the real directory…"}
+                {sampleUnit ? <>Sample uses directory polling unit <code>{sampleUnit}</code>. Send <code>LKP PU{sampleUnit}</code> to look up reports from the last 24 hours. Report codes: VUB vote buying · VIO violence · MSB staff misbehaviour · BOG ballot grabbing · INT intimidation.</> : "Loading a sample polling-unit code from the real directory…"}
               </p>
             </div>
             {reply && <p role="status" className="rounded-xl bg-ok-bg p-3 text-sm text-ok-text">{reply}</p>}

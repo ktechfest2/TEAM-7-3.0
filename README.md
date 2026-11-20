@@ -39,6 +39,8 @@ Open `/incidents` to submit a **simulated** incoming SMS and view the sanitized 
 
 For Africa's Talking sandbox callbacks, deploy the app to a publicly reachable HTTPS URL, create a sandbox two-way SMS shortcode, and set its incoming SMS callback to `https://<your-domain>/api/sms/inbound?token=<AT_CALLBACK_TOKEN>`. Set `AT_CALLBACK_TOKEN`, `AFRICASTALKING_API_KEY`, and `AFRICASTALKING_SHORTCODE` in the deployment environment so the route authenticates callbacks and can send a sandbox reply. Test using Africa's Talking's web simulator; sandbox messages do not reach real handsets. The accepted report format is `PU37/05/04/017VUB` (also accepts `COUNTRACK PU37/05/04/017VUB` for a shared keyword). Incident reports are not proof that an incident occurred.
 
+To look up recent incidents by SMS, send `LKP PU37/05/04/017`. `LKP` is the lookup command; the reply summarizes non-dismissed reports received for that polling unit in the last 24 hours and says they are public, unverified reports. The `/incidents` simulator supports this lookup without sending a real SMS.
+
 The live incident list and grouped home feed omit reports older than 24 hours. Old reports remain stored in `sms_incident_reports` for history; there is no stale label in the interface and no automatic deletion. The message format has no incident-occurrence time, so the 24-hour window is measured from `received_at`, which is only a proxy for when the incident happened. Apply `supabase/migrations/20261120000500_sms_incident_feed_24h.sql` to enable the grouped-feed cutoff in Supabase.
 
 ## Removing simulated data
