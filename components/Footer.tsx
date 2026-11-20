@@ -13,7 +13,6 @@ export function Footer() {
           <LogoMark className="size-8" /> {t("app.name")}
         </Link>
         <p className="text-sm">{t("home.principle")}</p>
-        <p className="text-xs">{t("banner.simulated")}</p>
       </div>
     </footer>
   );

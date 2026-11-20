@@ -70,9 +70,9 @@ Anyone enters the announced figure → CounTrack shows every gap, party by party
 - **Verification by agreement.** A unit is verified when two or more distinct witnesses submit identical readings, and they outnumber any disagreeing group. A single clear EC8A can stand on its own after five hours if nothing contradicts it.
 - **Wrong-unit protection.** If the code printed on the sheet doesn't match the unit the witness picked, or can't be read, the report is rejected with a clear explanation.
 - **Wall × Announced.** On `/collation`, enter the officially announced figure, or snap a screenshot of it, and see each party's gap against the verified wall result. Saved gaps become public evidence.
-- **IReV side by side.** `/irev` browses INEC's Result Viewing portal by election, state, LGA, ward and unit, and shows INEC's uploaded sheet beside CounTrack's witness-verified result.
+- **IReV comparison.** `/irev` browses INEC's Result Viewing portal by election, state, LGA, ward and unit. From a polling unit, open the CounTrack comparison board to read the IReV sheet and compare matching party figures with the witness wall. The import is analysis-only and checks that the sheet's polling-unit code matches.
 - **Live feed.** The home page shows what's happening at polling units: new photos, verified units, mismatches and incident reports.
-- **SMS incident reports.** Report vote buying, violence, staff misbehaviour, ballot snatching or intimidation by SMS (`PU37/05/04/017VUB`). `/incidents` has a simulator, and the Africa's Talking sandbox can deliver real callbacks.
+- **SMS incident reports and lookup.** Report vote buying, violence, staff misbehaviour, ballot snatching or intimidation by SMS (`PU37/05/04/017VUB`). Send `LKP PU37/05/04/017` to get recent incident counts for a polling unit. `/incidents` simulates both commands; Africa's Talking sandbox callbacks can also reply to lookup requests.
 - **Five languages.** English, Naijá (Nigerian Pidgin), Hausa, Yorùbá and Igbo, including error messages.
 
 ## How AI Fits Into CounTrack
@@ -111,7 +111,7 @@ Being straight about this: CounTrack does **not** know which figure is the true 
 - **Visible disagreement.** If witnesses' readings differ, the unit is marked "Needs review" and doesn't pick a side.
 - **Visible problems.** Every flag (a sum that doesn't add up, figures that disagree with the words, low confidence) is shown with the reading.
 - **Neutral language.** CounTrack says records "don't match". It never says anyone cheated.
-- **Simulated data is labelled.** Demo units, demo readings and simulated SMS reports are marked SIMULATED everywhere they appear.
+- **Simulated data stays out of public results.** Simulated polling units are excluded from public lists and feeds. The database cleanup migration below can remove seeded fixtures when they are no longer needed.
 
 We don't check the identity of witnesses. Each phone gets an anonymous session, so one person with several phones could pose as several witnesses. That's a real limitation, listed below.
 
@@ -130,19 +130,15 @@ No account is needed. Everything in the demo database is simulated. Open it on a
 
 | Unit | Status | What it shows |
 |---|---|---|
-| `SIM-001`, `SIM-002` | Verified | Wall and announced figures match |
-| `SIM-003` | Verified | **Wall 142 vs announced 241** for one party, a deliberate mismatch |
-| `SIM-004` | Pending (1 witness) | Add a second matching photo and it becomes Verified |
-| `SIM-005` | Needs review | Two witnesses' readings disagree |
+Seeded `SIM-*` units are local walkthrough fixtures. They are excluded from public search and feeds and should not be loaded into a shared or production database.
 
 **A quick demo path:**
 
-1. On the home page, search `SIM-003` under "compare a unit" to see the gap between the wall and the announced figure.
-2. Open `/units` and filter by Verified or Needs review.
-3. Open `/collation`, pick a unit and type an announced figure. The verdict updates as you type.
-4. Turn on Airplane Mode, take a photo on `/capture`, then turn the network back on and watch it upload from `/queue`.
+1. Open `/collation`, pick a unit and enter a figure to compare with the witness wall.
+2. Open `/irev`, choose an uploaded result sheet, and use **Compare in CounTrack** to read it and compare matching figures.
+3. Turn on Airplane Mode, take a photo on `/capture`, then reconnect and watch it upload from `/queue`.
+4. On `/incidents`, send `PU37/05/04/017VUB` to simulate a report, then send `LKP PU37/05/04/017` to look up the unit's recent reports.
 5. Switch the language from the header menu.
-6. On `/incidents`, send a simulated SMS such as `PU37/05/04/017VUB` and watch it land in the feed.
 
 ## Tech Stack
 
@@ -182,7 +178,7 @@ Requires Node.js 22 or later.
    ```
    cp .env.local.example .env
    ```
-5. **Load data.** `npm run seed` creates the simulated demo units and readings. `npm run import:polling-units` imports INEC's polling unit directory (it reads `.env.local`, so copy the Supabase variables there too).
+5. **Load data.** `npm run seed` is for an isolated local development database only. It creates simulated demo records. `npm run import:polling-units` imports INEC's polling unit directory (it reads `.env.local`, so copy the Supabase variables there too). Do not run the seed script against shared or production Supabase.
 6. **Run:**
    ```
    npm run dev
@@ -224,6 +220,16 @@ Requires Node.js 22 or later.
 | `NEXT_PUBLIC_SOLIDARITY_ENABLED`, `INCIDENT_SLA_MINUTES` | Experimental check-in feature, off by default |
 
 Don't commit `.env` or paste keys into issues or chats.
+
+## SMS incident lookups and report age
+
+Send `LKP PU37/05/04/017` to request a lookup. Replies summarize non-dismissed reports received for that polling unit in the last 24 hours and label them as public, unverified reports. The `/incidents` simulator exercises the same command without sending a real SMS. Because the message doesn't include when an incident happened, the 24-hour window uses `received_at` as a proxy; older rows remain in the database and are simply omitted from the live feed and lookup.
+
+Apply `supabase/migrations/20261120000500_sms_incident_feed_24h.sql` to enable the grouped feed's database-side cutoff.
+
+## Removing seeded demo data
+
+Apply `supabase/migrations/20261120000400_remove_simulated_demo_data.sql` in Supabase only when you are ready to permanently remove seeded polling units, their dependent records, simulated collation records, and existing demo/Africa's Talking sandbox incident reports. This migration has not been applied automatically. It doesn't remove imported real polling-unit directory rows.
 
 ## Project Structure
 
@@ -282,6 +288,7 @@ It powers:
 | Tool | Provider | Used for |
 |---|---|---|
 | [Claude](https://www.anthropic.com/claude), through [Claude Code](https://claude.com/claude-code) | Anthropic | Help writing, reviewing and debugging code, translations and documentation during development. Every change was reviewed by the team. Claude is not part of the running app. |
+| [Codex](https://openai.com/codex/) | OpenAI | Help writing, reviewing and debugging code and documentation during development. Every change was reviewed by the team. Codex is not part of the running app. |
 
 ### INEC public data
 
@@ -340,7 +347,7 @@ The IReV backend address can be changed with `IREV_API_BASE` if INEC moves it. C
 
 - Native-speaker review of the Naijá, Hausa, Yorùbá and Igbo translations. They're a careful first draft, not a certified translation.
 - Stronger witness independence. Today each phone is one witness, so one person with several phones counts several times.
-- Automatic comparison with IReV uploads, instead of side by side for a person to read.
+- More robust IReV sheet parsing and party-name matching across election types.
 - Real SMS on a production shortcode, beyond the Africa's Talking sandbox.
 - Polling unit locations on a map. The directory has names, not verified coordinates.
 - Testing with real observers and voters during an election, which we haven't been able to do.

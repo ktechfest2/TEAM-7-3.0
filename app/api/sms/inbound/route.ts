@@ -1,7 +1,8 @@
 import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import { adminClient } from "@/lib/supabase/admin";
-import { INCIDENTS, helpReply, parseIncidentMessage } from "@/lib/sms/incidents";
+import { INCIDENTS, formatIncidentLookupReply, helpReply, parseIncidentLookupMessage, parseIncidentMessage } from "@/lib/sms/incidents";
+import { getRecentIncidentCounts } from "@/lib/sms/lookup";
 
 type Incoming = { from?: string; text?: string; id?: string; linkId?: string; to?: string };
 
@@ -64,12 +65,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing or invalid sender/message" }, { status: 400 });
   }
 
+  const lookup = parseIncidentLookupMessage(text);
   const parsed = parseIncidentMessage(text);
   let reply: string;
   let reportId: string | null = null;
   let duplicate = false;
 
-  if (!parsed) {
+  if (lookup) {
+    const db = adminClient();
+    const { data: unit, error: unitError } = await db
+      .from("polling_units")
+      .select("id, code")
+      .eq("code", lookup.unitCode)
+      .eq("is_simulated", false)
+      .eq("directory_is_current", true)
+      .maybeSingle();
+    if (unitError) {
+      console.error("SMS incident lookup failed", unitError.message);
+      return NextResponse.json({ error: "Polling unit lookup unavailable" }, { status: 503 });
+    }
+    if (!unit) {
+      reply = `Polling unit ${lookup.unitCode} was not found. Check the code on your voter's card and try again.`;
+    } else {
+      try {
+        const counts = await getRecentIncidentCounts(unit.id);
+        reply = formatIncidentLookupReply(unit.code, counts);
+      } catch (error) {
+        console.error("SMS incident count lookup failed", error);
+        return NextResponse.json({ error: "Incident lookup unavailable" }, { status: 503 });
+      }
+    }
+  } else if (!parsed) {
     reply = helpReply();
   } else {
     const db = adminClient();
