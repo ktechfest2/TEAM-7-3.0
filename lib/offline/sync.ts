@@ -73,7 +73,7 @@ async function syncOne(supabase: SupabaseClient, userId: string, item: QueuedCap
       // The server couldn't reach the database or the reader: same as being offline, try again soon.
       if (res.status === RETRYABLE_STATUS || res.status === 401) throw new OfflineError(body?.error ?? "Service unavailable");
       // The server got a damaged or unreadable photo: retrying the same file can't help.
-      if (res.status === RETAKE_STATUS) throw new PhotoLostError(body?.error ?? "Please take this photo again.");
+      if (res.status === RETAKE_STATUS) throw new PhotoLostError(body?.error ?? t("error.retake"));
       // Our API's error messages are written for people; anything else gets a friendly default.
       throw body?.error ? new UserFacingError(body.error) : new Error(`Reading failed (${res.status})`);
     }
@@ -109,7 +109,7 @@ async function upload(supabase: SupabaseClient, userId: string, item: QueuedCapt
   // Check the photo against the fingerprint taken when it was sealed: never upload a damaged copy.
   const photo = await getPhoto(item.localId);
   if (!photo || !photo.byteLength || (await sha256Hex(photo)) !== item.sha256)
-    throw new PhotoLostError("This photo was damaged on this phone and can't be sent. Please take it again.");
+    throw new PhotoLostError(t("error.photoLost"));
   const path = `${userId}/${item.localId}.jpg`;
   const up = await supabase.storage
     .from("result-photos")

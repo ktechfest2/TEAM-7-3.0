@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { errorMessage, fetchJson } from "@/lib/http";
 
 /** Successful lookups are kept for the session; IReV is slow and the hierarchy rarely changes. */
 const cache = new Map<string, Promise<unknown>>();
@@ -8,11 +9,7 @@ const cache = new Map<string, Promise<unknown>>();
 async function load(url: string): Promise<unknown> {
   const hit = cache.get(url);
   if (hit) return hit;
-  const p = fetch(url).then(async (res) => {
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(typeof body.error === "string" ? body.error : `Request failed (${res.status})`);
-    return body;
-  });
+  const p = fetchJson<unknown>(url, undefined, "api.irev.unavailable");
   cache.set(url, p);
   p.catch(() => cache.delete(url));
   return p;
@@ -29,7 +26,7 @@ export function useFetch<T>(url: string | null) {
     let live = true;
     load(url).then(
       (body) => live && setState({ url, body: body as T, error: null }),
-      (e: unknown) => live && setState({ url, body: null, error: e instanceof Error ? e.message : "Request failed" }),
+      (e: unknown) => live && setState({ url, body: null, error: errorMessage(e, "api.irev.unavailable") }),
     );
     return () => { live = false; };
   }, [url, attempt]);

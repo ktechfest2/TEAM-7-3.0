@@ -1,4 +1,5 @@
 import { connection, NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { publicClient } from "@/lib/supabase/server";
 
 const SOURCE = "INEC CVR portal via the community-maintained nigeria-inec-geo snapshot";
@@ -29,6 +30,7 @@ function safeFilter(value: string | null, name: string): string | null | Respons
 
 /** Public real-world directory API. Supports exact PVC PU code lookup and paginated text search. */
 export async function GET(request: Request) {
+  const tr = apiT(request);
   await connection(); // per request, never prerendered at build time
   const params = new URL(request.url).searchParams;
   const level = params.get("level");
@@ -75,7 +77,7 @@ export async function GET(request: Request) {
     const { data: options, count: optionCount, error: optionsError } = await optionsQuery;
     if (optionsError) {
       console.error("polling unit hierarchy lookup failed", optionsError.message);
-      return NextResponse.json({ error: "Polling unit directory is temporarily unavailable" }, { status: 503 });
+      return NextResponse.json({ error: tr("api.directoryUnavailable") }, { status: 503 });
     }
     return NextResponse.json({ data: options, pagination: { total: optionCount ?? 0 }, source: SOURCE });
   }
@@ -119,7 +121,7 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error("polling unit lookup failed", error.message);
-    return NextResponse.json({ error: "Polling unit directory is temporarily unavailable" }, { status: 503 });
+    return NextResponse.json({ error: tr("api.directoryUnavailable") }, { status: 503 });
   }
 
   const first = data?.[0] as { directory_snapshot?: string | null; directory_source?: string | null } | undefined;

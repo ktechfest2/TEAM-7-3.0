@@ -1,6 +1,7 @@
 import { connection, NextResponse } from "next/server";
 import { Election } from "@/lib/elections";
-import { getElections, getLgas, getUnit, getUnits, getWards, IREV_SOURCE, IrevError } from "@/lib/irev/client";
+import { getElections, getLgas, getUnit, getUnits, getWards, IREV_SOURCE, IrevError, irevMessage } from "@/lib/irev/client";
+import { apiT } from "@/lib/i18n/api";
 import { IREV_ID } from "@/lib/irev/map";
 import { IREV_STATES } from "@/lib/irev/states";
 
@@ -63,9 +64,8 @@ export async function GET(req: Request) {
       }
     }
   } catch (err) {
-    if (err instanceof IrevError) return bad(err.message, err.status);
-    console.error("irev lookup failed", err);
-    return bad("IReV is unavailable right now", 502);
+    if (!(err instanceof IrevError)) console.error("irev lookup failed", err);
+    return bad(apiT(req)(irevMessage(err)), err instanceof IrevError ? err.status : 502);
   }
 }
 

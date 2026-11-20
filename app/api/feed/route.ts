@@ -1,4 +1,5 @@
 import { connection, NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { Election } from "@/lib/elections";
 import type { FeedEvent, FeedUnit } from "@/lib/feed";
 import { adminClient } from "@/lib/supabase/admin";
@@ -16,6 +17,7 @@ type IncidentFeedRow = { unit_id: string; incident_code: "VUB" | "VIO" | "MSB" |
 
 /** Latest public activity across all units: photos sealed, units verified or needing review, mismatches. */
 export async function GET(req: Request) {
+  const tr = apiT(req);
   // Always per request: never prerendered at build time (it reads the URL and refreshes results).
   await connection();
   try {
@@ -52,7 +54,7 @@ export async function GET(req: Request) {
   const failed = photos.error ?? results.error ?? diffs.error;
   if (failed) {
     console.error("feed failed", failed.message);
-    return NextResponse.json({ error: "The feed is unavailable right now" }, { status: 503 });
+    return NextResponse.json({ error: tr("api.feedUnavailable") }, { status: 503 });
   }
 
   const events: FeedEvent[] = [];

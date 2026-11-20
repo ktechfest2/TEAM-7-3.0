@@ -15,7 +15,7 @@ export function frameToJpeg(source: CanvasImageSource, width: number, height: nu
   canvas.getContext("2d")!.drawImage(source, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL("image/jpeg", quality);
   const bytes = dataUrlToBytes(dataUrl);
-  if (!dataUrl.startsWith("data:image/jpeg") || bytes.byteLength < 100) throw new Error("Could not save the photo. Please take it again.");
+  if (!dataUrl.startsWith("data:image/jpeg") || bytes.byteLength < 100) throw new Error("could not encode the photo as JPEG");
   return { bytes, dataUrl };
 }
 

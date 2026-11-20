@@ -60,7 +60,7 @@ export async function loadUnits(query: UnitsQuery): Promise<UnitsPage> {
   let only: string[] | null = null;
   if (query.status !== "all") {
     const ids = await idsReq;
-    if (!ids) throw new Error("Could not load verification results. Try again.");
+    if (!ids) throw new Error("could not load verification ids");
     only = ids[query.status];
   }
 

@@ -6,7 +6,6 @@ import { CheckFlags, ExtractedResult, PartyScores, VisionExtraction, type Readin
 import { adminClient } from "../supabase/admin";
 import { LOW_CONFIDENCE_THRESHOLD } from "../rules/checks";
 import { unitCodeFlag } from "../vision/map";
-import { demoRelaxSheetChecks } from "../demo-relax";
 
 type PhotoRow = {
   user_id: string;
@@ -44,7 +43,7 @@ export async function recomputeUnit(unitId: string, election: Election) {
     const clearEc8 = row.hash_verified === true
       && !!vision
       && vision.is_result_sheet
-      && (vision.form_type === "EC8A" || demoRelaxSheetChecks()) // TEMPORARY demo exception, see lib/demo-relax.ts
+      && vision.form_type === "EC8A"
       && vision.legible
       && (x.ai_confidence ?? 0) >= LOW_CONFIDENCE_THRESHOLD
       && !codeFlag

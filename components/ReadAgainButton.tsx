@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, RefreshCw } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { errorMessage, responseError, UserError } from "@/lib/http";
 import { ensureSession } from "@/lib/supabase/browser";
 
 /** Asks the reader to read a photo again (only works from the phone that took it). */
@@ -22,12 +23,11 @@ export function ReadAgainButton({ photoId, onDone }: { photoId: string; onDone?:
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ photoId, reread: true }),
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(body.error ?? t("error.reading"));
+      if (!res.ok) throw new UserError(await responseError(res, "error.reading"));
       onDone?.();
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error && !/fetch|load failed/i.test(e.message) ? e.message : t("error.reading"));
+      setError(errorMessage(e, "error.reading"));
     } finally {
       setBusy(false);
     }

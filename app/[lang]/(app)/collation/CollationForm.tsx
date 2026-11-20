@@ -14,6 +14,7 @@ import { ELECTION_STYLE } from "@/lib/election-style";
 import { DEFAULT_ELECTION, ELECTIONS, parseElection, type Election } from "@/lib/elections";
 import { signed } from "@/lib/format";
 import { t, type MessageKey } from "@/lib/i18n";
+import { errorMessage, fetchJson, UserError } from "@/lib/http";
 import { fileToJpeg } from "@/lib/image";
 import { useOnline } from "@/lib/offline/hooks";
 import { REGISTERED_PARTIES } from "@/lib/parties";
@@ -37,7 +38,7 @@ const number = new Intl.NumberFormat("en-NG");
 const fmt = (n: number) => number.format(n);
 
 type Wall = { status: UnitStatus; scores: Record<string, number> | null };
-type Verdict = "checking" | "waiting" | "enter" | "match" | "differ";
+type Verdict = "checking" | "unavailable" | "waiting" | "enter" | "match" | "differ";
 
 /**
  * The tally board: pick a polling unit, enter the official (announced / IReV) figure, typed or
@@ -54,7 +55,8 @@ export function CollationForm() {
   const picker = useUnitPicker(online, initialCode);
   const { unitId, unitCode, unitName } = picker.selection;
   const [election, setElection] = useState<Election>(() => parseElection(params.get("election") ?? DEFAULT_ELECTION));
-  const [wall, setWall] = useState<{ key: string; value: Wall } | null>(null);
+  const [wall, setWall] = useState<{ key: string; value: Wall | "failed" } | null>(null);
+  const [wallAttempt, setWallAttempt] = useState(0);
   const [scores, setScores] = useState<Record<string, string>>({});
   const [extra, setExtra] = useState<string[]>([]);
   const [newParty, setNewParty] = useState("");
@@ -70,15 +72,14 @@ export function CollationForm() {
   useEffect(() => {
     if (!wallKey || !unitCode) return;
     let active = true;
-    void fetch(`/api/compare?code=${encodeURIComponent(unitCode)}&election=${election}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b: { status: UnitStatus; wall: Record<string, number> | null } | null) => {
-        if (active) setWall({ key: wallKey, value: { status: b?.status ?? "pending", scores: b?.wall ?? null } });
-      })
-      .catch(() => active && setWall({ key: wallKey, value: { status: "pending", scores: null } }));
+    fetchJson<{ status: UnitStatus; wall: Record<string, number> | null }>(`/api/compare?code=${encodeURIComponent(unitCode)}&election=${election}`, undefined, "collation.wallFailed")
+      .then((b) => active && setWall({ key: wallKey, value: { status: b.status ?? "pending", scores: b.wall ?? null } }))
+      // Don't pretend the unit has no wall result: say the check failed and offer a retry.
+      .catch(() => active && setWall({ key: wallKey, value: "failed" }));
     return () => { active = false; };
-  }, [wallKey, unitCode, election]);
-  const current = wall?.key === wallKey ? wall.value : null;
+  }, [wallKey, unitCode, election, wallAttempt]);
+  const wallFailed = wall?.key === wallKey && wall.value === "failed";
+  const current = wall?.key === wallKey && wall.value !== "failed" ? wall.value : null;
   const wallScores = current?.scores ?? null;
 
   const base = wallScores ? Object.keys(wallScores).sort() : [...REGISTERED_PARTIES];
@@ -103,8 +104,45 @@ export function CollationForm() {
     ? Object.keys(comparable).reduce((s, p) => s + (wallScores[p] ?? 0), 0)
     : null;
 
-  const verdict: Verdict = !current ? "checking" : !wallScores ? "waiting" : !Object.keys(comparable).length ? "enter" : differing.length ? "differ" : "match";
+  const verdict: Verdict = wallFailed ? "unavailable" : !current ? "checking" : !wallScores ? "waiting" : !Object.keys(comparable).length ? "enter" : differing.length ? "differ" : "match";
   const style = ELECTION_STYLE[election];
+
+  /** Reads the figures from a screenshot / photo of the official result and fills the boxes. */
+  async function readPicture(file: File, requireUnitMatch = false) {
+    setReading(true);
+    setError(null);
+    setReadNote(null);
+    try {
+      if (!(await ensureSession())) throw new UserError(t("collation.failed"));
+      const photo = await fileToJpeg(file);
+      const res = await fetch("/api/collation/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image: photo.dataUrl, election }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; partyScores?: Record<string, number>; unitCode?: string | null; notes?: string };
+      if (!res.ok || !body.partyScores) throw new UserError(body.error ?? t("collation.readFailed"));
+      const read = body.partyScores;
+      const onPicture = body.unitCode ? normalizePuCode(body.unitCode) : null;
+      const chosen = unitCode ? normalizePuCode(unitCode) ?? unitCode : null;
+      if (requireUnitMatch && (!onPicture || !chosen || onPicture !== chosen)) {
+        setScores({});
+        setExtra([]);
+        throw new Error(onPicture ? t("collation.readOtherUnit", { code: onPicture }) : t("collation.irevUnitUnreadable"));
+      }
+      setExtra((x) => [...new Set([...x, ...Object.keys(read).filter((p) => !base.includes(p))])]);
+      setScores(Object.fromEntries(Object.entries(read).map(([p, v]) => [p, String(v)])));
+      setReadNote(
+        onPicture && chosen && onPicture !== chosen
+          ? t("collation.readOtherUnit", { code: onPicture })
+          : t("collation.readDone", { n: Object.keys(read).length }),
+      );
+    } catch (e) {
+      setError(errorMessage(e, "collation.readFailed"));
+    } finally {
+      setReading(false);
+    }
+  }
 
   // Import the selected INEC IReV document through our same-origin proxy and read it with
   // the existing vision endpoint. This remains an on-screen analysis and is never saved as
@@ -142,43 +180,6 @@ export function CollationForm() {
   function addParty() {
     if (newCode && !parties.includes(newCode)) setExtra((x) => [...x, newCode]);
     setNewParty("");
-  }
-
-  /** Reads the figures from a screenshot / photo of the official result and fills the boxes. */
-  async function readPicture(file: File, requireUnitMatch = false) {
-    setReading(true);
-    setError(null);
-    setReadNote(null);
-    try {
-      if (!(await ensureSession())) throw new Error(t("collation.failed"));
-      const photo = await fileToJpeg(file);
-      const res = await fetch("/api/collation/read", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ image: photo.dataUrl, election }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { error?: string; partyScores?: Record<string, number>; unitCode?: string | null; notes?: string };
-      if (!res.ok || !body.partyScores) throw new Error(body.error ?? t("collation.readFailed"));
-      const read = body.partyScores;
-      const onPicture = body.unitCode ? normalizePuCode(body.unitCode) : null;
-      const chosen = unitCode ? normalizePuCode(unitCode) ?? unitCode : null;
-      if (requireUnitMatch && (!onPicture || !chosen || onPicture !== chosen)) {
-        setScores({});
-        setExtra([]);
-        throw new Error(onPicture ? t("collation.readOtherUnit", { code: onPicture }) : t("collation.irevUnitUnreadable"));
-      }
-      setExtra((x) => [...new Set([...x, ...Object.keys(read).filter((p) => !base.includes(p))])]);
-      setScores(Object.fromEntries(Object.entries(read).map(([p, v]) => [p, String(v)])));
-      setReadNote(
-        onPicture && chosen && onPicture !== chosen
-          ? t("collation.readOtherUnit", { code: onPicture })
-          : t("collation.readDone", { n: Object.keys(read).length }),
-      );
-    } catch (e) {
-      setError(e instanceof Error && !/fetch|load failed/i.test(e.message) ? e.message : t("collation.readFailed"));
-    } finally {
-      setReading(false);
-    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -380,7 +381,7 @@ export function CollationForm() {
 
           {/* ── Verdict, source and save: stays in view while you type ───────── */}
           <aside className="flex flex-col gap-4 lg:sticky lg:top-24">
-            <VerdictCard verdict={verdict} differing={differing.length} gap={gap} />
+            <VerdictCard verdict={verdict} differing={differing.length} gap={gap} onRetry={() => { setWall(null); setWallAttempt((n) => n + 1); }} />
 
             <fieldset className="card flex flex-col gap-2 p-4">
               <legend className="contents">
@@ -440,9 +441,10 @@ function GapBadge({ diff, blank }: { diff: number | undefined; blank?: boolean }
   );
 }
 
-function VerdictCard({ verdict, differing, gap }: { verdict: Verdict; differing: number; gap: number }) {
+function VerdictCard({ verdict, differing, gap, onRetry }: { verdict: Verdict; differing: number; gap: number; onRetry: () => void }) {
   const look: Record<Verdict, { icon: LucideIcon; tone: string; title: string; body?: string }> = {
     checking: { icon: Loader2, tone: "bg-frame-ink/10 text-frame-ink", title: t("collation.verdict.checking") },
+    unavailable: { icon: TriangleAlert, tone: "bg-accent text-e-ink", title: t("collation.verdict.failed"), body: t("collation.wallFailed") },
     waiting: { icon: Clock, tone: "bg-frame-ink/10 text-frame-ink", title: t("collation.verdict.waiting"), body: t("collation.noWallYet") },
     enter: { icon: ArrowRight, tone: "bg-frame-ink/10 text-frame-ink", title: t("collation.verdict.enter"), body: t("collation.verdict.enterBody") },
     match: { icon: Check, tone: "bg-pop text-e-ink", title: t("collation.verdict.match"), body: t("collation.verdict.matchBody") },
@@ -466,6 +468,9 @@ function VerdictCard({ verdict, differing, gap }: { verdict: Verdict; differing:
           <p className="display text-2xl leading-tight">{v.title}</p>
         </div>
         {v.body && <p className="text-sm text-frame-muted">{v.body}</p>}
+        {verdict === "unavailable" && (
+          <button type="button" onClick={onRetry} className="btn btn-outline-light min-h-10 self-start text-sm">{t("error.retry")}</button>
+        )}
       </div>
     </section>
   );

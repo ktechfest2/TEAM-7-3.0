@@ -9,10 +9,11 @@ export const VISION_MODEL = process.env.DEEPSEEK_VISION_MODEL ?? "deepseek-flash
 const ENDPOINT = `${process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com"}/chat/completions`;
 const TIMEOUT_MS = 90_000;
 
+/** A reading failure people should be told about. `key` is translated by the route into the reader's language. */
 export class ExtractionError extends Error {
-  /** true when only a new photo can help (the image itself is unusable). */
-  constructor(message: string, readonly retake = false) {
-    super(message);
+  /** retake: true when only a new photo can help (the image itself is unusable). */
+  constructor(readonly key: "api.photoUnopenable" | "error.reading" | "error.retake", readonly retake = false) {
+    super(key);
   }
 }
 
@@ -42,7 +43,7 @@ async function complete(messages: Message[]): Promise<{ text: string; finish: st
   });
   const body = (await res.json().catch(() => ({}))) as Completion;
   if (res.status === 400 && /image/i.test(body.error?.message ?? ""))
-    throw new ExtractionError("The photo couldn't be opened. Please take it again.", true);
+    throw new ExtractionError("api.photoUnopenable", true);
   if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${body.error?.message ?? res.statusText}`);
   const choice = body.choices?.[0];
   return { text: choice?.message?.content ?? "", finish: choice?.finish_reason };
@@ -71,8 +72,8 @@ export async function extractFromImage(jpegBase64: string, election: Election): 
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const { text, finish } = await complete(messages);
-    if (finish === "length") throw new ExtractionError("We couldn't read this sheet properly. We'll try again shortly.");
-    if (finish === "content_filter") throw new ExtractionError("This photo couldn't be read. Please take it again.", true);
+    if (finish === "length") throw new ExtractionError("error.reading");
+    if (finish === "content_filter") throw new ExtractionError("error.retake", true);
 
     const parsed = parse(text);
     if (parsed?.success) return parsed.data;
@@ -84,5 +85,5 @@ export async function extractFromImage(jpegBase64: string, election: Election): 
       { role: "user", content: `That JSON does not match the schema:\n${problems}\nReply again with the corrected JSON object only.` },
     );
   }
-  throw new ExtractionError("We couldn't read this sheet properly. We'll try again shortly.");
+  throw new ExtractionError("error.reading");
 }

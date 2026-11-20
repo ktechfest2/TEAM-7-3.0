@@ -108,15 +108,19 @@ describe("fromVision", () => {
 
 describe("unitCodeFlag", () => {
   const v = VisionExtraction.parse(sample); // sheet says SIM-003
-  it("warns when the sheet's code is a different unit", () => {
-    expect(unitCodeFlag(v, "SIM-001")).toEqual({ code: "UNIT_CODE_MISMATCH", severity: "warning", field: "SIM-003" });
+  it("blocks a sheet whose code is a different unit", () => {
+    expect(unitCodeFlag(v, "SIM-001")).toEqual({ code: "UNIT_CODE_MISMATCH", severity: "blocking", field: "SIM-003" });
   });
   it("is quiet when they match, even written differently", () => {
     expect(unitCodeFlag(v, "SIM-003")).toBeNull();
     const real = VisionExtraction.parse({ ...sample, unit: { ...sample.unit, polling_unit_code: "37-6-1-2" } });
     expect(unitCodeFlag(real, "37/06/01/002")).toBeNull();
   });
-  it("is quiet when the sheet has no code", () => {
-    expect(unitCodeFlag(VisionExtraction.parse({ ...sample, unit: { ...sample.unit, polling_unit_code: null } }), "SIM-001")).toBeNull();
+  it("blocks a result sheet with no readable code: the unit can't be confirmed", () => {
+    expect(unitCodeFlag(VisionExtraction.parse({ ...sample, unit: { ...sample.unit, polling_unit_code: null } }), "SIM-001"))
+      .toEqual({ code: "UNIT_CODE_UNREADABLE", severity: "blocking" });
+  });
+  it("is quiet for a photo that isn't a result sheet (that has its own flag)", () => {
+    expect(unitCodeFlag(VisionExtraction.parse({ ...sample, is_result_sheet: false }), "SIM-001")).toBeNull();
   });
 });

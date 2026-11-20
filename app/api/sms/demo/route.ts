@@ -1,20 +1,22 @@
 import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { adminClient } from "@/lib/supabase/admin";
-import { INCIDENTS, formatIncidentLookupReply, helpReply, parseIncidentLookupMessage, parseIncidentMessage } from "@/lib/sms/incidents";
+import { formatIncidentLookupReply, parseIncidentLookupMessage, parseIncidentMessage } from "@/lib/sms/incidents";
 import { getRecentIncidentCounts } from "@/lib/sms/lookup";
 
 export async function POST(request: Request) {
+  const tr = apiT(request);
   let body: { from?: string; text?: string };
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Expected JSON" }, { status: 400 });
+    return NextResponse.json({ error: tr("api.badSms") }, { status: 400 });
   }
   const from = String(body.from ?? "").trim();
   const text = String(body.text ?? "").trim();
   if (!/^\+?[\d ()-]{7,24}$/.test(from) || !text || text.length > 500) {
-    return NextResponse.json({ error: "Enter a phone number and a message up to 500 characters" }, { status: 400 });
+    return NextResponse.json({ error: tr("api.badSms") }, { status: 400 });
   }
 
   const lookup = parseIncidentLookupMessage(text);
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Polling unit lookup unavailable" }, { status: 503 });
     }
     if (!unit) {
-      return NextResponse.json({ ok: true, accepted: false, reply: `Polling unit ${lookup.unitCode} was not found. Check the code and try again.` });
+      return NextResponse.json({ ok: true, accepted: false, reply: tr("sms.unitNotFound", { code: lookup.unitCode }) });
     }
     try {
       const counts = await getRecentIncidentCounts(unit.id);
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
   }
 
   const parsed = parseIncidentMessage(text);
-  if (!parsed) return NextResponse.json({ ok: true, accepted: false, reply: helpReply() });
+  if (!parsed) return NextResponse.json({ ok: true, accepted: false, reply: tr("sms.help") });
 
   const db = adminClient();
   const { data: unit, error: unitError } = await db
@@ -56,9 +58,9 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (unitError) {
     console.error("Demo incident PU lookup failed", unitError.message);
-    return NextResponse.json({ error: "Polling unit lookup unavailable" }, { status: 503 });
+    return NextResponse.json({ error: tr("api.tryLater") }, { status: 503 });
   }
-  if (!unit) return NextResponse.json({ ok: true, accepted: false, reply: `Polling unit ${parsed.unitCode} was not found. Check the code and try again.` });
+  if (!unit) return NextResponse.json({ ok: true, accepted: false, reply: tr("sms.unitNotFound", { code: parsed.unitCode }) });
 
   const secret = process.env.SMS_SENDER_HASH_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   const senderFingerprint = secret ? createHmac("sha256", secret).update(from).digest("hex") : null;
@@ -66,8 +68,11 @@ export async function POST(request: Request) {
     const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { count, error } = await db.from("sms_incident_reports").select("id", { count: "exact", head: true })
       .eq("sender_fingerprint", senderFingerprint).eq("source", "demo").gte("received_at", since);
-    if (error) return NextResponse.json({ error: "Rate limit check unavailable" }, { status: 503 });
-    if ((count ?? 0) >= 10) return NextResponse.json({ error: "Demo limit reached for this sender. Try again later." }, { status: 429 });
+    if (error) {
+      console.error("Demo incident rate check failed", error.message);
+      return NextResponse.json({ error: tr("api.tryLater") }, { status: 503 });
+    }
+    if ((count ?? 0) >= 10) return NextResponse.json({ error: tr("api.demoLimit") }, { status: 429 });
   }
 
   const { data: report, error: insertError } = await db.from("sms_incident_reports").insert({
@@ -77,13 +82,13 @@ export async function POST(request: Request) {
     sender_fingerprint: senderFingerprint,
   }).select("id").single();
   if (insertError) {
-    console.error("Demo incident insert failed", insertError.message);
-    return NextResponse.json({ error: "Could not save incident report. Apply the sms_incident_reports migration first." }, { status: 503 });
+    console.error("Demo incident insert failed (is the sms_incident_reports migration applied?)", insertError.message);
+    return NextResponse.json({ error: tr("api.incidentSaveFailed") }, { status: 503 });
   }
   return NextResponse.json({
     ok: true,
     accepted: true,
     reportId: report.id,
-    reply: `SIMULATED reply: Your response has been recorded for ${unit.code}: ${INCIDENTS[parsed.incidentCode]}.`,
+    reply: tr("sms.recorded", { unit: unit.code, incident: tr(`incident.${parsed.incidentCode}`) }),
   });
 }

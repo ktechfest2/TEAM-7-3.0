@@ -17,11 +17,22 @@ const BASE = (process.env.IREV_API_BASE ?? "https://dolphin-app-sleqh.ondigitalo
 
 export const IREV_SOURCE = "INEC Result Viewing portal (IReV), inecelectionresults.ng";
 
+/**
+ * An IReV failure to tell people about. The message is a translation key (routes translate it with
+ * irevMessage), kept in `message` so it survives being rethrown out of a "use cache" function.
+ */
 export class IrevError extends Error {
-  constructor(message: string, readonly status = 502) {
-    super(message);
+  constructor(key: IrevMessageKey, readonly status = 502) {
+    super(key);
   }
 }
+
+type IrevMessageKey = "api.irev.timeout" | "api.irev.unavailable" | "api.irev.chooseState" | "api.irev.noUnit" | "api.unknownState";
+const IREV_KEYS: readonly string[] = ["api.irev.timeout", "api.irev.unavailable", "api.irev.chooseState", "api.irev.noUnit", "api.unknownState"];
+
+/** The key to show for any error from this client; unknown errors read as "IReV is unavailable". */
+export const irevMessage = (err: unknown): IrevMessageKey =>
+  err instanceof Error && IREV_KEYS.includes(err.message) ? (err.message as IrevMessageKey) : "api.irev.unavailable";
 
 async function irevGet(path: string, params: Record<string, string | number | undefined> = {}): Promise<unknown> {
   const url = new URL(path, BASE);
@@ -30,12 +41,12 @@ async function irevGet(path: string, params: Record<string, string | number | un
   try {
     res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
   } catch {
-    throw new IrevError("IReV did not answer in time. Try again in a moment.", 504);
+    throw new IrevError("api.irev.timeout", 504);
   }
-  if (!res.ok) throw new IrevError(`IReV answered ${res.status}.`, res.status === 404 ? 404 : 502);
+  if (!res.ok) throw new IrevError("api.irev.unavailable", res.status === 404 ? 404 : 502);
   const body: unknown = await res.json().catch(() => null);
   if (!body || (typeof body === "object" && "success" in body && body.success === false)) {
-    throw new IrevError("IReV refused the request.", 502);
+    throw new IrevError("api.irev.unavailable", 502);
   }
   return body;
 }
@@ -65,8 +76,8 @@ export async function getElections(election: Election, stateCode: string | null,
   const typeId = await getElectionTypeId(election);
   if (!typeId) return [];
   const state = stateCode ? stateByCode(stateCode) : undefined;
-  if (stateCode && !state) throw new IrevError("Unknown state code.", 400);
-  if (isStateScoped(election) && !state) throw new IrevError("Choose a state first.", 400);
+  if (stateCode && !state) throw new IrevError("api.unknownState", 400);
+  if (isStateScoped(election) && !state) throw new IrevError("api.irev.chooseState", 400);
   const list = await electionsOfType(typeId, isStateScoped(election) ? state!.irevId : null);
   return list.filter((e) => matchesDate(e, date));
 }
@@ -76,7 +87,7 @@ export async function getLgas(electionId: string, stateCode: string): Promise<Ir
   "use cache";
   cacheLife("hours");
   const state = stateByCode(stateCode);
-  if (!state) throw new IrevError("Unknown state code.", 400);
+  if (!state) throw new IrevError("api.unknownState", 400);
   const lgas = toLgas(await irevGet(`elections/${electionId}/lga/state/${state.irevId}`));
   // State-level elections (governorship and below) also answer on the election's own LGA list.
   return lgas.length ? lgas : toLgas(await irevGet(`elections/${electionId}/lga`));
@@ -102,7 +113,7 @@ export async function getUnit(electionId: string, unitId: string): Promise<{ uni
   const body = await irevGet(`elections/${electionId}/pu/${unitId}`);
   const raw = dataOf(body);
   const unit = toUnit(raw);
-  if (!unit) throw new IrevError("IReV has no such polling unit in this election.", 404);
+  if (!unit) throw new IrevError("api.irev.noUnit", 404);
   const election = raw && typeof raw === "object" && "election" in raw ? toElection(raw.election) : null;
   return { unit, election };
 }

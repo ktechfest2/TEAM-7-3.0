@@ -117,8 +117,8 @@ export function LiveFeed() {
   const cacheLabel = incidentCacheAt ? new Date(incidentCacheAt).toLocaleString() : "";
 
   return (
-    <section id="live" className="panel scroll-mt-20 px-4 py-14 md:px-12 md:py-24">
-      <div className="mx-auto flex max-w-4xl flex-col gap-8">
+    <section id="live" className="panel scroll-mt-20 px-2 py-10 md:px-5 md:py-14">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
         <header className="flex flex-col items-center gap-4 text-center">
           <span className="inline-flex items-center gap-2 rounded-full bg-frame px-3.5 py-1.5 text-xs font-bold tracking-wide text-frame-ink uppercase">
             <span className="relative flex size-2">
@@ -228,7 +228,7 @@ function Item({ e, now, fresh, onHide }: { e: FeedEvent; now: number; fresh: boo
   const where = [e.unit.ward, e.unit.lga, e.unit.state].filter(Boolean).join(" · ");
 
   let headline: string;
-  if (e.kind === "incident") headline = t("feed.incident", { incident: INCIDENT_LABELS[e.incidentCode], unit: e.unit.name });
+  if (e.kind === "incident") headline = t("feed.incident", { incident: t(`incident.${e.incidentCode}`), unit: e.unit.name });
   else if (e.kind === "photo") headline = t("feed.photo", { unit: e.unit.name });
   else if (e.kind === "verified") headline = t("feed.verified", { unit: e.unit.name, n: e.witnesses });
   else if (e.kind === "flagged") headline = t("feed.flagged", { unit: e.unit.name });
@@ -276,11 +276,3 @@ function Item({ e, now, fresh, onHide }: { e: FeedEvent; now: number; fresh: boo
     </li>
   );
 }
-
-const INCIDENT_LABELS: Record<Extract<FeedEvent, { kind: "incident" }>['incidentCode'], string> = {
-  VUB: "Vote buying",
-  VIO: "Violence",
-  MSB: "INEC staff misbehaviour",
-  BOG: "Ballot grabbing",
-  INT: "Intimidation",
-};

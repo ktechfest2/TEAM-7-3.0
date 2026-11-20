@@ -84,7 +84,9 @@ export function CaptureForm({ election, onBusyChange }: { election: Election; on
       setDismissed(null);
       void syncAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      console.error("could not save photo", e);
+      // Usually the phone's storage is full; never show the browser's own error text.
+      setError(e instanceof DOMException && e.name === "QuotaExceededError" ? t("error.storageFull") : t("error.photoSave"));
     } finally {
       setBusy(false);
     }

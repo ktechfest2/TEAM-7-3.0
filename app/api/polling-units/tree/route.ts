@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { connection } from "next/server";
 import { PAGE_SIZE, type DirectoryTree, type TreeResponse } from "@/lib/directory";
 import { publicClient } from "@/lib/supabase/server";
@@ -6,11 +7,12 @@ import { publicClient } from "@/lib/supabase/server";
 type WardRow = { state_name: string; lga_name: string; name: string; directory_snapshot: string };
 
 /** The whole State → LGA → Ward hierarchy in one response, so phones can cache it for offline use. */
-export async function GET() {
+export async function GET(req: Request) {
+  const tr = apiT(req);
   await connection();
   const db = publicClient();
   const count = await db.from("polling_unit_directory_wards").select("code", { count: "exact", head: true });
-  if (count.error) return unavailable(count.error.message);
+  if (count.error) return unavailable(tr, count.error.message);
 
   const pages = Math.ceil((count.count ?? 0) / PAGE_SIZE);
   const results = await Promise.all(
@@ -26,7 +28,7 @@ export async function GET() {
     ),
   );
   const failed = results.find((r) => r.error);
-  if (failed?.error) return unavailable(failed.error.message);
+  if (failed?.error) return unavailable(tr, failed.error.message);
 
   const tree: DirectoryTree = {};
   let snapshot: string | null = null;
@@ -41,7 +43,7 @@ export async function GET() {
   return NextResponse.json(body, { headers: { "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800" } });
 }
 
-function unavailable(message: string) {
+function unavailable(tr: ReturnType<typeof apiT>, message: string) {
   console.error("directory tree failed", message);
-  return NextResponse.json({ error: "Polling unit directory is temporarily unavailable" }, { status: 503 });
+  return NextResponse.json({ error: tr("api.directoryUnavailable") }, { status: 503 });
 }

@@ -1,8 +1,10 @@
 import { connection, NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { adminClient } from "@/lib/supabase/admin";
 import { INCIDENT_ACTIVE_WINDOW_MS, INCIDENTS } from "@/lib/sms/incidents";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const tr = apiT(req);
   await connection(); // per request, never prerendered at build time
   const cutoff = new Date(Date.now() - INCIDENT_ACTIVE_WINDOW_MS).toISOString();
   const { data, error } = await adminClient()
@@ -14,8 +16,8 @@ export async function GET() {
     .limit(100);
 
   if (error) {
-    console.error("Incident dashboard query failed", error.message);
-    return NextResponse.json({ error: "Incident reports are unavailable. Apply the sms_incident_reports migration." }, { status: 503 });
+    console.error("Incident dashboard query failed (is the sms_incident_reports migration applied?)", error.message);
+    return NextResponse.json({ error: tr("api.incidentsUnavailable") }, { status: 503 });
   }
   const reports = (data ?? []).map((row) => ({
     ...row,

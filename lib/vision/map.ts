@@ -2,7 +2,6 @@ import { PartyCode, type CheckMeta, type ExtractedResult, type PartyScores, type
 import { normalizePuCode } from "../directory";
 import type { CheckFlag } from "../schemas";
 import { wordsToNumber } from "./words";
-import { demoRelaxSheetChecks } from "../demo-relax";
 
 type Figure = VisionExtraction["registered_voters"];
 
@@ -71,7 +70,6 @@ export function fromVision(v: VisionExtraction): { result: ExtractedResult; meta
 /** A result sheet must have a readable PU code that matches the witness's selected unit. */
 export function unitCodeFlag(v: VisionExtraction, chosenCode: string): CheckFlag | null {
   if (!v.is_result_sheet) return null;
-  if (demoRelaxSheetChecks()) return null; // TEMPORARY demo exception, see lib/demo-relax.ts
   const rawOnSheet = v.unit.polling_unit_code?.trim();
   const onSheet = rawOnSheet ? normalizePuCode(rawOnSheet) : null;
   const chosen = normalizePuCode(chosenCode);

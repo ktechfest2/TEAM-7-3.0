@@ -4,6 +4,7 @@ import { checkResult } from "@/lib/rules/checks";
 import { parseElection } from "@/lib/elections";
 import { isNetworkError, RETAKE_STATUS, RETRYABLE_STATUS } from "@/lib/network";
 import { CheckFlags, ExtractRequest, VisionExtraction } from "@/lib/schemas";
+import { apiT } from "@/lib/i18n/api";
 import { recomputeUnit } from "@/lib/server/recompute";
 import { adminClient } from "@/lib/supabase/admin";
 import { userClient } from "@/lib/supabase/server";
@@ -17,11 +18,12 @@ const fail = (error: string, status: number) => NextResponse.json({ error }, { s
 
 /** Photo → server re-hash → vision model → zod → rule checks → save → recompute unit status. */
 export async function POST(req: Request) {
+  const tr = apiT(req);
   const body = ExtractRequest.safeParse(await req.json().catch(() => null));
-  if (!body.success) return fail("Something went wrong sending this photo. We'll try again.", 400);
+  if (!body.success) return fail(tr("api.photoSendFailed"), 400);
 
   const { data: { user } } = await (await userClient()).auth.getUser();
-  if (!user) return fail("Connecting this phone… We'll try again in a moment.", 401);
+  if (!user) return fail(tr("api.connecting"), 401);
 
   const admin = adminClient();
   const { data: photo } = await admin
@@ -29,8 +31,8 @@ export async function POST(req: Request) {
     .select("id, unit_id, user_id, election, image_url, sha256_hash, polling_units(code)")
     .eq("id", body.data.photoId)
     .maybeSingle();
-  if (!photo) return fail("We couldn't find this photo on the server. Please take it again.", 404);
-  if (photo.user_id !== user.id) return fail("This photo was sent from a different phone, so it can't be read here.", 403);
+  if (!photo) return fail(tr("api.photoNotFound"), 404);
+  if (photo.user_id !== user.id) return fail(tr("api.otherPhone"), 403);
   const election = parseElection(photo.election);
 
   // Idempotent: a retry after a dropped response just returns the existing reading.
@@ -38,7 +40,7 @@ export async function POST(req: Request) {
   const { data: existing } = await admin.from("extracted_results").select("id, raw, check_flags").eq("photo_id", photo.id).maybeSingle();
   if (existing && body.data.reread) {
     const del = await admin.from("extracted_results").delete().eq("id", existing.id);
-    if (del.error) return fail("Couldn't start a new reading. Please try again.", 500);
+    if (del.error) return fail(tr("api.rereadFailed"), 500);
   } else if (existing) {
     const unit = photo.polling_units as { code: string } | { code: string }[] | null;
     const chosenCode = (Array.isArray(unit) ? unit[0] : unit)?.code;
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
       const { error: statusError } = await admin.from("result_photos").update({ sync_status: "failed" }).eq("id", photo.id);
       if (statusError) console.error("could not reject mismatched photo", statusError.message);
       await recomputeUnit(photo.unit_id, election).catch((error) => console.error("could not refresh unit after rejecting reading", error));
-      return fail(unitCodeError(codeFlag.code, codeFlag.field, chosenCode), RETAKE_STATUS);
+      return fail(unitCodeError(tr, codeFlag.code, codeFlag.field, chosenCode), RETAKE_STATUS);
     }
     const unitStatus = await recomputeUnit(photo.unit_id, election);
     return NextResponse.json({ ok: true, photoId: photo.id, unitStatus: unitStatus.status });
@@ -71,7 +73,7 @@ export async function POST(req: Request) {
     // it can never count, so don't spend a reading on it. The phone asks for a retake.
     if (!hashVerified) {
       await admin.from("result_photos").update({ sync_status: "failed" }).eq("id", photo.id);
-      return fail("This photo arrived damaged (its fingerprint doesn't match). Please take it again.", RETAKE_STATUS);
+      return fail(tr("api.photoDamaged"), RETAKE_STATUS);
     }
 
     const fixture = demoFixture(photo.sha256_hash);
@@ -85,7 +87,7 @@ export async function POST(req: Request) {
       const { error: statusError } = await admin.from("result_photos").update({ sync_status: "failed" }).eq("id", photo.id);
       if (statusError) console.error("could not reject mismatched photo", statusError.message);
       await recomputeUnit(photo.unit_id, election).catch((error) => console.error("could not refresh unit after rejecting reading", error));
-      return fail(unitCodeError(codeFlag.code, codeFlag.field, chosenCode), RETAKE_STATUS);
+      return fail(unitCodeError(tr, codeFlag.code, codeFlag.field, chosenCode), RETAKE_STATUS);
     }
 
     const ins = await admin.from("extracted_results").insert({
@@ -104,16 +106,14 @@ export async function POST(req: Request) {
   } catch (e) {
     await admin.from("result_photos").update({ sync_status: "failed" }).eq("id", photo.id);
     console.error("extract failed", e);
-    if (e instanceof ExtractionError) return fail(e.message, e.retake ? RETAKE_STATUS : 502);
+    if (e instanceof ExtractionError) return fail(tr(e.key), e.retake ? RETAKE_STATUS : 502);
     // Couldn't reach Supabase or DeepSeek: the phone keeps the photo queued and tries again soon.
-    if (isNetworkError(e)) return fail("Couldn't reach the reading service. Trying again shortly.", RETRYABLE_STATUS);
-    return fail("Couldn't read this photo right now. It will retry.", 502);
+    if (isNetworkError(e)) return fail(tr("api.readerUnreachable"), RETRYABLE_STATUS);
+    return fail(tr("api.readLater"), 502);
   }
 }
 
-function unitCodeError(code: string, scannedCode?: string, selectedCode?: string) {
-  if (code === "UNIT_CODE_MISMATCH") {
-    return `This sheet shows polling unit ${scannedCode}, but you selected ${selectedCode}. This report was not accepted. Select the unit printed on the sheet and take the photo again.`;
-  }
-  return `CounTrack couldn't read the polling-unit code on this sheet, so it couldn't confirm the selected unit${selectedCode ? ` (${selectedCode})` : ""}. Retake the photo with the code clearly visible.`;
+function unitCodeError(tr: ReturnType<typeof apiT>, code: string, scannedCode?: string, selectedCode?: string) {
+  if (code === "UNIT_CODE_MISMATCH") return tr("api.unitMismatch", { scanned: scannedCode ?? "?", selected: selectedCode ?? "?" });
+  return tr("api.unitUnreadable", { selected: selectedCode ?? "" });
 }

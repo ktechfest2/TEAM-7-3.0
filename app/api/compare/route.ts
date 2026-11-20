@@ -1,4 +1,5 @@
 import { connection, NextResponse } from "next/server";
+import { apiT } from "@/lib/i18n/api";
 import { diffScores } from "@/lib/rules/diff";
 import { CompareQuery, ExtractedResult, PartyScores } from "@/lib/schemas";
 import { recomputeUnit } from "@/lib/server/recompute";
@@ -9,21 +10,22 @@ import { publicClient } from "@/lib/supabase/server";
  * party by party. The same comparison the discrepancy check stores.
  */
 export async function GET(req: Request) {
+  const tr = apiT(req);
   await connection(); // per request, never prerendered at build time
   const sp = new URL(req.url).searchParams;
   const query = CompareQuery.safeParse({ code: sp.get("code"), election: sp.get("election") ?? "presidential" });
-  if (!query.success) return NextResponse.json({ error: "Choose a polling unit" }, { status: 400 });
+  if (!query.success) return NextResponse.json({ error: tr("api.chooseUnit") }, { status: 400 });
   const { code, election } = query.data;
 
   const db = publicClient();
   const { data: unit } = await db.from("polling_units").select("id, code, name, ward, lga, state").eq("code", code).maybeSingle();
-  if (!unit) return NextResponse.json({ error: "Polling unit not found" }, { status: 404 });
+  if (!unit) return NextResponse.json({ error: tr("api.unitNotFound") }, { status: 404 });
 
   try {
     await recomputeUnit(unit.id, election);
   } catch (error) {
     console.error("comparison refresh failed", error);
-    return NextResponse.json({ error: "Comparison is unavailable right now" }, { status: 503 });
+    return NextResponse.json({ error: tr("api.compareUnavailable") }, { status: 503 });
   }
 
   const [res, col] = await Promise.all([
@@ -31,7 +33,7 @@ export async function GET(req: Request) {
     db.from("collation_results").select("party_scores, source, announced_at").eq("unit_id", unit.id).eq("election", election)
       .order("announced_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  if (res.error || col.error) return NextResponse.json({ error: "Comparison is unavailable right now" }, { status: 503 });
+  if (res.error || col.error) return NextResponse.json({ error: tr("api.compareUnavailable") }, { status: 503 });
 
   const status = res.data?.status ?? "pending";
   const wall = status === "verified" ? ExtractedResult.safeParse(res.data?.agreed_scores).data ?? null : null;
