@@ -91,11 +91,6 @@ Structure (types, elections, LGAs, wards) is cached for hours and uploads for mi
 4. **Verify** (`lib/server/recompute.ts`): a unit is *verified* when 2+ distinct witnesses' readings are identical.
 5. **Diff**: every collated line for the unit is compared with the verified wall result (`discrepancies`).
 
-## Demo accounts (after seeding)
-
-`witness1@demo.countrack.test`, `witness2@…`, `witness3@…`, `agent1@…`, `observer1@…`.
-The password is `DEMO_PASSWORD` from `.env` (default `countrack-demo`).
-
 ## Seeded units
 
 | Unit | State | Purpose |
