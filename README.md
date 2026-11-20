@@ -1,101 +1,331 @@
 # CounTrack
 
-Witnesses photograph the result sheet (Form EC8A) posted at a polling unit. CounTrack hashes and
-timestamps each photo, reads the numbers with a vision model, checks them with plain rules,
-verifies a unit when 2+ independent witnesses agree, and shows where announced figures
-don't match the wall.
+CounTrack turns photos of the result sheet posted at a polling unit into time-stamped, tamper-evident evidence, and shows plainly where the figures announced later don't match the figures on the wall.
 
-**AI reads · rules check · people confirm.** The app never accuses anyone: it reports that records don't match.
+> CounTrack doesn't accuse anyone. It shows what the wall said, who photographed it, when, and whether the announced figure matches.
 
+**AI reads · rules check · people confirm.**
 
-## Setup
+Built by Team 7 for KTechFest.
 
-1. `npm install`
-2. Create a Supabase project. Copy `.env.local.example` to `.env` and fill in the URL and keys (including `SUPABASE_SERVICE_ROLE_KEY`, which the seed script needs).
-3. Supabase dashboard → **SQL Editor** → paste and run `supabase/migrations/20261118000000_init.sql`.
-4. `npm run seed`: creates 5 demo accounts and 5 simulated polling units.
-5. `npm run dev` → http://localhost:3000
+## The Problem
 
-**Supabase dashboard settings:** Authentication → Sign In / Providers → enable **Anonymous sign-ins** (for "Continue anonymously").
+At 4:15 PM, counting ends at a polling unit in Ikeja. The presiding officer pastes the result sheet (Form EC8A) on the wall. Tunde, a voter, takes a photo. So do a party agent and a neighbour.
 
-**Phones need HTTPS** (camera and hashing require a secure context). Use the Vercel URL, or `npx next dev --experimental-https` on the same Wi-Fi.
+That evening the ward collation centre announces a figure for the same unit. It's different. Party B had 142 votes on the wall and 241 in the announcement.
 
-## Scripts
+Tunde has the proof on his phone, but it's one photo among thousands in WhatsApp groups. It has no time stamp anyone trusts, nobody can tell whether it's been edited, and nobody has put it next to the announced figure. By the time anyone compares them, the result has been declared and the photo has been forwarded so often that it no longer looks like evidence.
+
+The figures exist. What's missing is a trusted way to record them at the source and compare them with what's announced, unit by unit.
+
+## What We Chose to Build
+
+We didn't build a result-collation system, a fraud detector or a prediction tool. We don't announce winners.
+
+We focused on one gap: between "the result was posted on the wall" and "the announced figure for that unit matches it, or doesn't".
+
+CounTrack lets anyone photograph a polling unit's result sheet. It seals the photo with a fingerprint the moment it's taken, reads the figures with AI, checks them with plain arithmetic rules, and marks the unit verified only when independent witnesses agree. Then it puts the verified wall result beside any announced figure, party by party.
+
+## How We Approached the Challenge
+
+Our first realisation was that Nigerians already photograph result sheets. The problem is that those photos are scattered, can't be checked for edits, aren't tied to a polling unit, and are never compared with the announced figures. Another place to upload pictures would just add to the pile.
+
+So we built around four ideas:
+
+1. **Evidence at the source.** The photo is hashed (SHA-256) and time-stamped on the phone before it goes anywhere, and the server hashes it again on arrival. An edited or damaged file never counts.
+2. **Independent agreement.** One photo is a claim. Two or more witnesses whose readings match is a verified result.
+3. **Plain comparison.** The verified wall result and the announced figure sit side by side. Every gap shows, party by party.
+4. **Works where elections happen.** It works offline: photos queue on the phone and upload when there's a signal. It speaks English, Naijá, Hausa, Yorùbá and Igbo.
+
+AI is good at one thing here: reading handwritten and printed figures off a photo. We deliberately stopped it there. It transcribes. It doesn't decide what's true, and it never compares numbers. Plain code does that.
+
+## How CounTrack Works
+
+```
+A witness picks the polling unit and photographs the result sheet
+        ↓
+The phone compresses the photo, strips its location data and seals it (SHA-256 + time)
+        ↓
+It waits in the phone's queue until there's a connection, then uploads
+        ↓
+The server re-hashes the file. If the fingerprint doesn't match, it's rejected
+        ↓
+AI transcribes the sheet into strict JSON (figures, words, polling unit code)
+        ↓
+Plain rules check it: sums, missing fields, words vs digits, unit code matches
+        ↓
+2+ independent witnesses with identical readings → the unit is Verified
+Readings disagree → Needs review       Only one witness → Pending
+        ↓
+Anyone enters the announced figure → CounTrack shows every gap, party by party
+```
+
+## Key Features
+
+- **Capture.** Pick the state, LGA, ward and polling unit from INEC's directory of ~176,000 units, then take the photo in the app's own camera. The election type (presidential down to councillorship) is chosen with tabs.
+- **Tamper-evident photos.** Every photo carries a SHA-256 fingerprint taken on the phone and checked again on the server.
+- **Offline first.** Photos are saved on the phone and upload automatically when the connection returns. Without a connection, a photo can be saved as a draft and assigned to a unit later.
+- **Verification by agreement.** A unit is verified when two or more distinct witnesses submit identical readings, and they outnumber any disagreeing group. A single clear EC8A can stand on its own after five hours if nothing contradicts it.
+- **Wrong-unit protection.** If the code printed on the sheet doesn't match the unit the witness picked, or can't be read, the report is rejected with a clear explanation.
+- **Wall × Announced.** On `/collation`, enter the officially announced figure, or snap a screenshot of it, and see each party's gap against the verified wall result. Saved gaps become public evidence.
+- **IReV side by side.** `/irev` browses INEC's Result Viewing portal by election, state, LGA, ward and unit, and shows INEC's uploaded sheet beside CounTrack's witness-verified result.
+- **Live feed.** The home page shows what's happening at polling units: new photos, verified units, mismatches and incident reports.
+- **SMS incident reports.** Report vote buying, violence, staff misbehaviour, ballot snatching or intimidation by SMS (`PU37/05/04/017VUB`). `/incidents` has a simulator, and the Africa's Talking sandbox can deliver real callbacks.
+- **Five languages.** English, Naijá (Nigerian Pidgin), Hausa, Yorùbá and Igbo, including error messages.
+
+## How AI Fits Into CounTrack
+
+We use DeepSeek's vision model (`deepseek-flash`, DeepSeek-V4.1-Flash), called only from server-side routes so the API key never reaches the browser.
+
+| Step | File | What the AI does |
+|---|---|---|
+| Reading a result sheet | `app/api/extract/route.ts`, `lib/vision/extract.ts` | Transcribes the photo into strict JSON: unit details, voter counts, each party's score in figures and words, totals, and a confidence for each field. Told to copy exactly what's written and not to calculate, correct or guess. |
+| Reading an announced figure | `app/api/collation/read/route.ts` | Reads party figures from a screenshot or photo of the announced result, to fill in the form. The person checks them before saving. |
+
+Every AI answer is validated against a schema (zod), with one retry. The instructions are in `lib/vision/prompt.ts`.
+
+These parts are **not** AI. They're plain, tested code:
+
+- Arithmetic and consistency checks (`lib/rules/checks.ts`)
+- Deciding whether a unit is verified (`lib/rules/consensus.ts`)
+- Comparing wall and announced figures (`lib/rules/diff.ts`)
+- Matching the sheet's polling unit code to the chosen unit (`lib/vision/map.ts`)
+
+**What the AI does not do:**
+
+- It doesn't decide that a result is genuine or that fraud happened.
+- It doesn't fill in figures it can't read. An unreadable figure is left blank and flagged.
+- It doesn't verify a unit. Only agreement between independent witnesses does.
+- It doesn't replace INEC, observers or the courts.
+
+If the AI call fails, the photo stays safely queued and is read again later. A reading the witness thinks is wrong can be read again from the same phone.
+
+## Trust, Verification & Uncertainty
+
+Being straight about this: CounTrack does **not** know which figure is the true result. It records what witnesses photographed and shows where records disagree.
+
+- **Fingerprints.** Each photo is hashed on the phone and again on the server. Edited or damaged files are rejected.
+- **Independent witnesses.** Only each phone's latest reading counts, and one phone can't verify a unit alone (except a lone clear EC8A after five hours, with nothing contradicting it).
+- **Visible disagreement.** If witnesses' readings differ, the unit is marked "Needs review" and doesn't pick a side.
+- **Visible problems.** Every flag (a sum that doesn't add up, figures that disagree with the words, low confidence) is shown with the reading.
+- **Neutral language.** CounTrack says records "don't match". It never says anyone cheated.
+- **Simulated data is labelled.** Demo units, demo readings and simulated SMS reports are marked SIMULATED everywhere they appear.
+
+We don't check the identity of witnesses. Each phone gets an anonymous session, so one person with several phones could pose as several witnesses. That's a real limitation, listed below.
+
+## Moderation
+
+There are no user accounts. Nobody signs in, so witnesses stay anonymous.
+
+- An admin can remove an item from the home page's "What's happening" feed by entering the passcode set in `ADMIN_DELETE_KEY`. The record itself is kept.
+- Incident reports are stored as unreviewed, and can be dismissed in the database.
+
+| Unit | Status | What it shows |
+|---|---|---|
+| `SIM-001`, `SIM-002` | Verified | Wall and announced figures match |
+| `SIM-003` | Verified | **Wall 142 vs announced 241** for one party, a deliberate mismatch |
+| `SIM-004` | Pending (1 witness) | Add a second matching photo and it becomes Verified |
+| `SIM-005` | Needs review | Two witnesses' readings disagree |
+
+**A quick demo path:**
+
+1. On the home page, search `SIM-003` under "compare a unit" to see the gap between the wall and the announced figure.
+2. Open `/units` and filter by Verified or Needs review.
+3. Open `/collation`, pick a unit and type an announced figure. The verdict updates as you type.
+4. Turn on Airplane Mode, take a photo on `/capture`, then turn the network back on and watch it upload from `/queue`.
+5. Switch the language from the header menu.
+6. On `/incidents`, send a simulated SMS such as `PU37/05/04/017VUB` and watch it land in the feed.
+
+## Tech Stack
+
+- **Framework:** Next.js 16 (App Router, React 19, TypeScript)
+- **Styling:** Tailwind CSS v4
+- **Database, storage and auth:** Supabase (Postgres, Storage, anonymous auth, row-level security)
+- **AI:** DeepSeek vision model, behind server routes
+- **Election data:** INEC's IReV results API and CVR polling unit directory
+- **Offline:** a service worker (`public/sw.js`) and IndexedDB (via `idb`)
+- **SMS:** Africa's Talking sandbox
+- **Testing:** Vitest
+
+## Getting Started
+
+Requires Node.js 22 or later.
+
+1. **Install:**
+   ```
+   npm install
+   ```
+2. **Create a Supabase project.** In Authentication → Sign In / Providers, enable **Anonymous sign-ins**.
+3. **Run the migrations** in the SQL editor, in this order. Run `all_elections` on its own, because new enum values must be committed before they're used.
+   ```
+   supabase/migrations/20261118000000_init.sql
+   supabase/migrations/20261119000000_polling_unit_directory.sql
+   supabase/migrations/20261119000100_solidarity.sql
+   supabase/migrations/20261119000200_elections.sql
+   supabase/migrations/20261119000300_all_elections.sql      (on its own)
+   supabase/migrations/20261119000400_polling_unit_search.sql
+   supabase/migrations/20261120000000_sms_incident_reports.sql
+   supabase/migrations/20261120000200_sms_incident_reports_reconcile.sql
+   supabase/migrations/20261120000300_feed_hidden.sql
+   ```
+4. **Create `.env`** from the example and fill it in (see below):
+   ```
+   cp .env.local.example .env
+   ```
+5. **Load data.** `npm run seed` creates the simulated demo units and readings. `npm run import:polling-units` imports INEC's polling unit directory (it reads `.env.local`, so copy the Supabase variables there too).
+6. **Run:**
+   ```
+   npm run dev
+   ```
+   Open http://localhost:3000.
+7. **Test on a phone.** The camera and offline mode need HTTPS. Run `npm run preview`, then `npm run tunnel` in a second terminal, and open the `https://…trycloudflare.com` address it prints.
+8. **Deploy** to Vercel or any Node host (`npm run build`, then `npm start`). Add the same environment variables in the host's settings. Your local `.env` isn't used in production.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Dev server |
-| `npm test` | Rule-engine tests (checks, consensus, diff) |
+| `npm run dev` | Development server |
+| `npm test` | Tests (rule checks, consensus, diff, vision mapping, translations, IReV mapping) |
 | `npm run typecheck` | TypeScript check |
-| `npm run seed` | (Re)create simulated demo data |
-| `npm run import:polling-units` | Import a versioned INEC polling-unit directory snapshot into Supabase |
-| `npm run icons` | Regenerate PWA PNG icons from `public/icons/icon.svg` |
-| `npm run fixture -- <photoId>` | Save a real reading as a `DEMO_MODE` cached fixture |
+| `npm run lint` | ESLint |
+| `npm run seed` | Recreate simulated demo data |
+| `npm run import:polling-units` | Import the INEC polling unit directory snapshot |
+| `npm run preview` | Production build served on your network |
+| `npm run tunnel` | Temporary HTTPS address for phone testing |
+| `npm run icons` | Regenerate app icons from `public/icons/icon.svg` |
+| `npm run fixture -- <photoId>` | Save a real reading as a cached demo fixture (`DEMO_MODE`) |
 
-## SMS incident sandbox
+## Environment Variables
 
-Open `/incidents` to submit a **simulated** incoming SMS and view the sanitized incident feed. The demo page does not send a real text. It validates the message against the real polling-unit directory and records reports as unreviewed. For a fresh database, apply `supabase/migrations/20261120000000_sms_incident_reports.sql` followed by `supabase/migrations/20261120000200_sms_incident_reports_reconcile.sql`. For an existing database, apply the reconciliation migration; it preserves the separate public-verification `incident_reports` table and renames an earlier SMS-shaped table if one exists, or creates `sms_incident_reports` beside it.
-
-For Africa's Talking sandbox callbacks, deploy the app to a publicly reachable HTTPS URL, create a sandbox two-way SMS shortcode, and set its incoming SMS callback to `https://<your-domain>/api/sms/inbound?token=<AT_CALLBACK_TOKEN>`. Set `AT_CALLBACK_TOKEN`, `AFRICASTALKING_API_KEY`, and `AFRICASTALKING_SHORTCODE` in the deployment environment so the route authenticates callbacks and can send a sandbox reply. Test using Africa's Talking's web simulator; sandbox messages do not reach real handsets. The accepted report format is `PU37/05/04/017VUB` (also accepts `COUNTRACK PU37/05/04/017VUB` for a shared keyword). Incident reports are not proof that an incident occurred.
-
-## Polling unit directory API
-
-`GET /api/polling-units` serves real directory records from Supabase. Search with `?code=01/02/03/004` for a full PVC polling-unit code, or use `?q=market&state=Lagos&limit=20&offset=0` for paginated text search. The capture form loads its State → LGA → Ward → Polling unit options from `?level=states`, `?level=lgas&state=Lagos`, `?level=wards&state=Lagos&lga=Ikeja`, and `?level=units&state=Lagos&lga=Ikeja&ward=...`. Responses include dataset provenance. Simulated `SIM-*` demo units are excluded from the real directory API and remain available in the existing demo experience.
-
-To import real directory data:
-
-1. Apply `supabase/migrations/20261119000000_polling_unit_directory.sql` in the Supabase SQL Editor.
-2. Set `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
-3. Run `npm run import:polling-units`.
-
-The importer resolves the selected GitHub ref to a commit, validates the source manifest, row count, full codes, and duplicates, then upserts in batches. It marks older imported snapshots inactive only after the new snapshot has fully imported. By default it uses the source repo's `main` branch; set `INEC_DATASET_REF` to a 40-character commit SHA for a repeatable import. The source is the community-maintained [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) snapshot of INEC's public CVR directory; check records against INEC before relying on them. This import contains names and administrative locations, not verified directions or coordinates.
-
-## Languages
-
-CounTrack speaks English, Naijá (Nigerian Pidgin), Hausa, Yorùbá and Igbo. Readers get their language from a `lang` cookie (set by the header's language menu), else from their browser's `Accept-Language`. URLs stay the same (`/units`), and `proxy.ts` rewrites them to the prerendered `app/[lang]/…` page. A prefixed link like `/ha/units` opens in that language and remembers it.
-
-`t()` works everywhere without a language argument: server components read the `[lang]` root param, and client components read it from context or `<html lang>`. Strings live in `lib/i18n/<code>.json`. Every non-English file overrides English key by key and falls back to English for anything missing. `tests/i18n.test.ts` fails if a catalog has an unknown key, drops a `{placeholder}`, or misses a user-facing string.
-
-To add a language (Fulfulde, Kanuri, Tiv, Ibibio, Ijaw, Nupe…): add it to `lib/i18n/langs.ts`, add `lib/i18n/<code>.json`, and register it in `lib/i18n/index.ts`. **Have native speakers review translations before an election**: the current Pidgin, Hausa, Yorùbá and Igbo text is a careful first draft, not a certified translation. Languages with stacked tone marks use the phone's font (see `html:lang(yo)` in `globals.css`), because the web fonts can't position them.
-
-## Elections
-
-CounTrack tracks the seven election types INEC lists on IReV: presidential, governorship, senatorial, House of Representatives (`house_of_reps`), State House of Assembly (`state_assembly`), chairmanship and councillorship. Apply `supabase/migrations/20261119000300_all_elections.sql` in the SQL Editor **on its own** (new enum values must commit before they're used). It renames the old `local_government` value to `chairmanship`; old links and queued captures that say `local_government` are read as chairmanship.
-
-## Polling units page
-
-`/units` searches, filters, counts and pages the whole directory (~176k units) in the database. Apply `supabase/migrations/20261119000400_polling_unit_search.sql` for fast search: without its trigram indexes every search scans the table (several seconds).
-
-## IReV API
-
-INEC's Result Viewing portal ([inecelectionresults.ng](https://www.inecelectionresults.ng)) has no public API. Its web app reads a JSON backend one click at a time (election type → election → state → LGA → ward → polling unit). `GET /api/irev` wraps that backend so you can jump to any level directly:
-
-| Query | Returns |
+| Variable | Used for |
 |---|---|
-| `?level=states` | The 37 states with their INEC code and IReV id (they differ: FCT is code `37`, IReV id `15`) |
-| `?level=elections&election=governorship&state=24[&date=2023-03-18]` | Elections of that type, newest first. `date` accepts `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. Presidential needs no state |
-| `?level=lgas&electionId=…&state=24` | LGAs in that state for the election |
-| `?level=wards&electionId=…&lga=…` | Wards in the LGA |
-| `?level=units&electionId=…&ward=…` | Polling units, each with `code` (matches CounTrack's), `documentUrl` (the uploaded EC8A) and `uploadedAt` |
-| `?level=unit&electionId=…&pu=…` | One polling unit |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (browser) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public key (browser) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only Supabase key. Never prefix with `NEXT_PUBLIC_`. |
+| `DEEPSEEK_API_KEY` | Server-only key for the vision model |
+| `DEEPSEEK_VISION_MODEL`, `DEEPSEEK_BASE_URL` | Optional model and endpoint overrides |
+| `AFRICASTALKING_API_KEY`, `AFRICASTALKING_SHORTCODE` | Sandbox SMS replies |
+| `AT_CALLBACK_TOKEN` | Authenticates Africa's Talking callbacks to `/api/sms/inbound?token=…` |
+| `SMS_SENDER_HASH_SECRET` | Optional key for pseudonymous SMS rate limiting (defaults to the service-role key) |
+| `ADMIN_DELETE_KEY` | Passcode for removing items from the home feed |
+| `DEMO_PASSWORD` | Password for the seeded demo witness accounts |
+| `DEMO_MODE` | `true` returns cached readings for known demo photos, so a live demo doesn't depend on venue Wi-Fi |
+| `INEC_DATASET_REF` | Git commit of the polling unit dataset to import, for repeatable imports |
+| `IREV_API_BASE` | Optional override for the IReV backend address |
+| `NEXT_PUBLIC_SOLIDARITY_ENABLED`, `INCIDENT_SLA_MINUTES` | Experimental check-in feature, off by default |
 
-`GET /api/irev/sheet?electionId=…&pu=…[&download=1]` streams that unit's result sheet image/PDF through CounTrack (only from INEC's storage hosts, only image/PDF types). The `/irev` page uses all of this: pick type, state, election date, LGA, ward and polling unit, and see the IReV sheet beside CounTrack's witness-verified result.
+Don't commit `.env` or paste keys into issues or chats.
 
-Structure (types, elections, LGAs, wards) is cached for hours and uploads for minutes. If INEC moves the backend, set `IREV_API_BASE` (the current address is in the portal's `main.*.js` bundle). The mapping from IReV's JSON lives in `lib/irev/map.ts` and is covered by `tests/irev.test.ts`.
+## Project Structure
 
-## How the core flow works
+```
+app/
+  [lang]/            Pages, one per language (the URL stays the same; proxy.ts picks the language)
+    page.tsx           Home: report form, live feed, compare a unit
+    (app)/capture      Photograph a result sheet
+    (app)/queue        The phone's upload queue
+    (app)/units        Polling unit directory and each unit's evidence
+    (app)/review       One photo and its reading
+    (app)/collation    Wall × Announced tally board
+    (app)/irev         INEC IReV browser
+    (app)/incidents    SMS incident simulator
+  api/               Server routes (extract, collation, compare, feed, irev, polling-units, sms, …)
+components/          UI pieces (camera, unit picker, feed, diff table, …)
+lib/
+  vision/            AI prompt, call and mapping to stored results
+  rules/             Plain-code checks, consensus and diff
+  offline/           IndexedDB queue, sync and offline directory
+  irev/              IReV client and mapping
+  i18n/              Translations (en, pcm, ha, yo, ig)
+  supabase/          Browser, server and admin clients
+public/sw.js         Service worker (offline pages and files)
+proxy.ts             Language selection and Supabase session refresh
+scripts/             Directory import, icon generation, demo fixtures
+supabase/            Migrations and seed script
+tests/               Vitest tests
+```
 
-1. **Capture** (`/capture`): photo → compressed JPEG (EXIF stripped) → SHA-256 on the phone → saved to IndexedDB.
-2. **Sync** (`lib/offline/sync.ts`): uploads to Storage, inserts `result_photos` (RLS: own rows only), calls `/api/extract`. Runs on load, on reconnect, and on "Sync now".
-3. **Extract** (`/api/extract`): server re-hashes the file (`hash_verified`), the vision model reads it into strict JSON (zod), rule checks run, and the result is saved.
-4. **Verify** (`lib/server/recompute.ts`): a unit is *verified* when 2+ distinct witnesses' readings are identical.
-5. **Diff**: every collated line for the unit is compared with the verified wall result (`discrepancies`).
+## Credits & Acknowledgements
 
-## Seeded units
+As required by rule 1.2, these are the open-source libraries, public APIs, pre-trained AI models and public datasets CounTrack uses.
 
-| Unit | State | Purpose |
+### Pre-trained AI models
+
+| Model | Provider | Used for |
 |---|---|---|
-| SIM-001, SIM-002 | Verified | Records match |
-| SIM-003 | Verified | **Wall PB 142 vs announced 241** (deliberate mismatch) |
-| SIM-004 | Pending (1 witness) | Add a 2nd witness live → Verified |
-| SIM-005 | Needs review | Two witnesses' readings disagree |
+| DeepSeek-V4.1-Flash (`deepseek-flash`) | [DeepSeek](https://www.deepseek.com) | Reading result sheets and announced figures from photos |
+
+### INEC open data and APIs
+
+CounTrack is built on public data from the [Independent National Electoral Commission (INEC)](https://inecnigeria.org). Each source powers specific features:
+
+| INEC source | Features that use it | Where in the code |
+|---|---|---|
+| [IReV, the Result Viewing portal](https://www.inecelectionresults.ng) results API | The `/irev` browser (election type → election → state → LGA → ward → polling unit), and INEC's uploaded result beside CounTrack's witness-verified result | `lib/irev/client.ts`, `app/api/irev/route.ts` |
+| IReV result-sheet storage | Viewing and downloading the EC8A sheet INEC uploaded for a unit, streamed through CounTrack (INEC's hosts only, images and PDFs only) | `app/api/irev/sheet/route.ts` |
+| [INEC Continuous Voter Registration (CVR) polling unit directory](https://cvr.inecnigeria.org/pu) | The State → LGA → Ward → Polling unit picker on Capture and Collation, the `/units` directory and search, the offline unit list, and checking the code in SMS incident reports | `scripts/import-polling-units.ts`, `app/api/polling-units/` |
+| INEC's list of registered political parties (2023 general elections) | A hint for reading handwritten party names on result sheets | `lib/parties.ts` |
+
+The IReV backend address can be changed with `IREV_API_BASE` if INEC moves it. CounTrack only reads public INEC data; it never writes to INEC systems.
+
+### Public APIs and services
+
+| Service | Used for |
+|---|---|
+| [DeepSeek API](https://api-docs.deepseek.com) | Calling the vision model |
+| [Supabase](https://supabase.com) | Database, photo storage and anonymous sessions |
+| [Africa's Talking](https://africastalking.com) (sandbox) | Inbound SMS incident reports and replies |
+| [Google Fonts](https://fonts.google.com) via `next/font` | Font files, downloaded at build time and served by CounTrack |
+| [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (`cloudflared`) | Development only: a temporary HTTPS address for phone testing |
+
+### Public datasets
+
+| Dataset | Used for |
+|---|---|
+| [`nigeria-inec-geo`](https://github.com/saidiadegoke/nigeria-inec-geo) by saidiadegoke | The snapshot of INEC's CVR polling unit directory (~176,000 units) that `npm run import:polling-units` loads. See that repository for its licence. Check records against INEC before relying on them. |
+
+### Open-source libraries
+
+| Library | Licence | Used for |
+|---|---|---|
+| [Next.js](https://nextjs.org) | MIT | Web framework |
+| [React](https://react.dev) and React DOM | MIT | UI |
+| [TypeScript](https://www.typescriptlang.org) | Apache-2.0 | Language |
+| [Tailwind CSS](https://tailwindcss.com) and `@tailwindcss/turbopack` | MIT | Styling |
+| [`@supabase/supabase-js`](https://github.com/supabase/supabase-js) and [`@supabase/ssr`](https://github.com/supabase/ssr) | MIT | Supabase clients |
+| [Zod](https://zod.dev) | MIT | Validating AI output and API input |
+| [idb](https://github.com/jakearchibald/idb) | ISC | IndexedDB for the offline queue |
+| [Lucide](https://lucide.dev) (`lucide-react`) | ISC | Icons |
+| [`server-only`](https://www.npmjs.com/package/server-only) | MIT | Keeps server code out of the browser |
+| [sharp](https://sharp.pixelplumbing.com) | Apache-2.0 | Generating app icons |
+| [Vitest](https://vitest.dev) | MIT | Tests |
+| [tsx](https://tsx.is) | MIT | Running scripts |
+| [ESLint](https://eslint.org) and `eslint-config-next` | MIT | Linting |
+
+### Fonts
+
+| Font | Designer | Licence |
+|---|---|---|
+| [Geist and Geist Mono](https://vercel.com/font) | Vercel | SIL Open Font License 1.1 |
+| [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) | Mathieu Triay | SIL Open Font License 1.1 |
+
+## Future Improvements
+
+- Native-speaker review of the Naijá, Hausa, Yorùbá and Igbo translations. They're a careful first draft, not a certified translation.
+- Stronger witness independence. Today each phone is one witness, so one person with several phones counts several times.
+- Automatic comparison with IReV uploads, instead of side by side for a person to read.
+- Real SMS on a production shortcode, beyond the Africa's Talking sandbox.
+- Polling unit locations on a map. The directory has names, not verified coordinates.
+- Testing with real observers and voters during an election, which we haven't been able to do.
+
+## Safety Note
+
+CounTrack is not an official source of election results. It records what witnesses photographed and shows where records don't match. It does not prove that fraud happened, and the AI can misread a figure. For official results, refer to INEC. Report electoral offences to INEC, the police or accredited observers. Incident reports in CounTrack are unverified and are not proof that an incident occurred.
+
+## Team
+
+- Zainab Musa
+- Victory Anyanwu
+
+---
+
+CounTrack doesn't accuse anyone. It shows what the wall said, who photographed it, when, and whether the announced figure matches.
